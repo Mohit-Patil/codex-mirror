@@ -1,0 +1,42 @@
+{
+  "name": "codex-mirror",
+  "version": "0.1.0",
+  "description": "Local multi-account manager for Codex CLI with isolated runtime/auth state and TUI clone management.",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "codex-mirror": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "dev": "tsx src/cli.ts",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
+  },
+  "keywords": [
+    "codex",
+    "cli",
+    "mirror"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.3.2",
+    "commander": "^14.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
