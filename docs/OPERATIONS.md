@@ -28,6 +28,13 @@ node dist/cli.js update <clone>
 node dist/cli.js wrapper install
 ```
 
+## Check/setup PATH for wrappers
+
+```bash
+node dist/cli.js path status
+node dist/cli.js path setup
+```
+
 ## Backup / restore
 
 Backup:

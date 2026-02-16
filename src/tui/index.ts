@@ -1,8 +1,10 @@
+import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { CloneManager } from "../core/clone-manager.js";
 import { sanitizeCloneName, validateCloneName } from "../core/clone-name.js";
 import { Doctor } from "../core/doctor.js";
 import { Launcher } from "../core/launcher.js";
+import { detectShell, ensurePathInShellRc, getPathStatus, isDirOnPath, resolveRcFile, sourceCommandFor } from "../core/path-setup.js";
 import { CloneRecord, DoctorResult } from "../types.js";
 import { promptConfirm, promptMenu, promptText, renderPanel } from "./menu.js";
 
@@ -11,6 +13,7 @@ interface TuiDeps {
   launcher: Launcher;
   doctor: Doctor;
   defaultCloneBaseDir: string;
+  defaultBinDir: string;
 }
 
 interface DashboardSummary {
@@ -22,7 +25,7 @@ interface DashboardSummary {
   unknownAuth: number;
 }
 
-type MainAction = "quick" | "create" | "manage" | "update-all" | "doctor" | "about" | "exit";
+type MainAction = "quick" | "create" | "manage" | "update-all" | "doctor" | "path-setup" | "about" | "exit";
 
 export async function runTui(deps: TuiDeps): Promise<void> {
   const healthCache = new Map<string, DoctorResult>();
@@ -33,13 +36,14 @@ export async function runTui(deps: TuiDeps): Promise<void> {
       const action = await promptMenu<MainAction>({
         title: "CODEX MIRROR",
         subtitle: "Multi-account Codex clone manager",
-        statusLines: buildDashboardStatusLines(clones, healthCache),
+        statusLines: buildDashboardStatusLines(clones, healthCache, deps.defaultBinDir),
         items: [
           { label: "Quick Clone", value: "quick", description: "Name only, ready in seconds" },
           { label: "New Clone Wizard", value: "create", description: "Guided clone creation" },
           { label: "Manage Clones", value: "manage", description: "Run, login, logout, update, remove" },
           { label: "Update All Clones", value: "update-all", description: "Re-pin all clones to current Codex" },
           { label: "Diagnostics", value: "doctor", description: "Health check one or all clones" },
+          { label: "Shell PATH Setup", value: "path-setup", description: "Make clone wrappers discoverable globally" },
           { label: "About", value: "about", description: "Project behavior and notes" },
           { label: "Exit", value: "exit" },
         ],
@@ -65,6 +69,10 @@ export async function runTui(deps: TuiDeps): Promise<void> {
       }
       if (action === "doctor") {
         await diagnostics(deps, healthCache);
+        continue;
+      }
+      if (action === "path-setup") {
+        await configureShellPath(deps);
         continue;
       }
       if (action === "about") {
@@ -138,6 +146,7 @@ async function quickClone(deps: TuiDeps): Promise<void> {
     `Name: ${clone.name}`,
     `Path: ${clone.rootPath}`,
     `Wrapper: ${clone.wrapperPath}`,
+    ...buildPathNoticeLines(deps.defaultBinDir),
   ]);
 }
 
@@ -196,6 +205,7 @@ async function createCloneWizard(deps: TuiDeps): Promise<void> {
     `Name: ${clone.name}`,
     `Path: ${clone.rootPath}`,
     `Wrapper: ${clone.wrapperPath}`,
+    ...buildPathNoticeLines(deps.defaultBinDir),
   ]);
 }
 
@@ -437,7 +447,57 @@ async function diagnostics(deps: TuiDeps, healthCache: Map<string, DoctorResult>
   await showDoctorResults([result]);
 }
 
-function buildDashboardStatusLines(clones: CloneRecord[], healthCache: Map<string, DoctorResult>): string[] {
+async function configureShellPath(deps: TuiDeps): Promise<void> {
+  const status = await getPathStatus({ binDir: deps.defaultBinDir });
+  if (status.onPath) {
+    await waitContinue("Shell PATH Setup", "Already active", [
+      `Wrapper dir: ${status.normalizedBinDir}`,
+      "Current shell already resolves clone wrappers.",
+    ]);
+    return;
+  }
+
+  const shouldConfigure = await promptConfirm({
+    title: "Shell PATH Setup",
+    subtitle: "Wrapper command discovery",
+    lines: [
+      `Wrapper dir: ${status.normalizedBinDir}`,
+      `Shell: ${status.shell}`,
+      `RC file: ${status.rcFile}`,
+      "Append/update managed PATH block now?",
+    ],
+    defaultValue: true,
+    confirmLabel: "Apply setup",
+    cancelLabel: "Back",
+  });
+
+  if (!shouldConfigure) {
+    return;
+  }
+
+  const result = await ensurePathInShellRc({
+    binDir: deps.defaultBinDir,
+    shell: status.shell,
+    rcFile: status.rcFile,
+  });
+  const after = await getPathStatus({
+    binDir: deps.defaultBinDir,
+    shell: result.shell,
+    rcFile: result.rcFile,
+  });
+
+  const lines = [
+    `${result.changed ? "Updated" : "Already configured"} ${result.rcFile}`,
+    after.onPath ? "PATH is active in this session." : `Reload shell now: ${result.sourceCommand}`,
+  ];
+  await waitContinue("Shell PATH Setup", "Completed", lines);
+}
+
+function buildDashboardStatusLines(
+  clones: CloneRecord[],
+  healthCache: Map<string, DoctorResult>,
+  defaultBinDir: string,
+): string[] {
   const lines: string[] = [];
   const cachedResults = clones
     .map((clone) => healthCache.get(clone.name))
@@ -458,6 +518,8 @@ function buildDashboardStatusLines(clones: CloneRecord[], healthCache: Map<strin
       lines.push(`Cached health for ${cachedResults.length}/${clones.length} clone(s).`);
     }
   }
+
+  lines.push(isDirOnPath(defaultBinDir) ? "Wrapper PATH: ready" : "Wrapper PATH: missing (run Shell PATH Setup)");
 
   if (clones.length === 0) {
     lines.push("No clones yet. Create one from Quick Clone.");
@@ -513,6 +575,7 @@ function printAbout(): void {
       "Each clone has its own auth/session/config state.",
       "Runtime is pinned per clone and updated on demand.",
       "Diagnostics checks runtime, wrapper, writable paths, and auth status.",
+      "Shell PATH Setup writes a managed PATH block in your shell RC file.",
       "Use Quick Clone for fastest flow, Wizard for guided setup.",
     ],
     footer: "Open source utility for multi-account local workflows",
@@ -603,4 +666,17 @@ function isUserAbort(error: unknown): boolean {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function buildPathNoticeLines(binDir: string): string[] {
+  if (isDirOnPath(binDir)) {
+    return [];
+  }
+  const shell = detectShell(process.env.SHELL);
+  const rcFile = resolveRcFile(shell, process.env.HOME ?? homedir());
+  return [
+    `PATH notice: ${binDir} is not on PATH`,
+    "Run: codex-mirror path setup",
+    `Then: ${sourceCommandFor(shell, rcFile)}`,
+  ];
 }

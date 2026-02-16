@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { tmpdir } from "node:os";
@@ -51,6 +51,23 @@ describe("CLI smoke flow", () => {
       const listed = JSON.parse(listJson.stdout) as Array<{ name: string }>;
       expect(listed).toHaveLength(1);
       expect(listed[0]?.name).toBe("smoke");
+
+      const rcFile = join(sandbox, ".bashrc");
+      const pathStatus = await runCli(
+        ["path", "status", "--bin-dir", env.CODEX_MIRROR_BIN_DIR!, "--shell", "bash", "--rc-file", rcFile],
+        env,
+      );
+      expect(pathStatus.code).toBe(0);
+      expect(pathStatus.stdout).toContain("On PATH (current session): no");
+
+      const pathSetup = await runCli(
+        ["path", "setup", "--bin-dir", env.CODEX_MIRROR_BIN_DIR!, "--shell", "bash", "--rc-file", rcFile],
+        env,
+      );
+      expect(pathSetup.code).toBe(0);
+      expect(pathSetup.stdout).toContain("Updated:");
+      const rcContent = await readFile(rcFile, "utf8");
+      expect(rcContent).toContain("codex-mirror PATH");
 
       const doctorBefore = await runCli(["doctor", "smoke", "--json"], env);
       expect(doctorBefore.code).toBe(0);

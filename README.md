@@ -79,6 +79,10 @@ node dist/cli.js remove work
 
 # Reinstall wrappers
 node dist/cli.js wrapper install
+
+# Check/setup PATH for wrapper commands
+node dist/cli.js path status
+node dist/cli.js path setup
 ```
 
 ## Data layout
@@ -109,6 +113,18 @@ Path overrides:
 
 - `CODEX_MIRROR_HOME` (changes global root)
 - `CODEX_MIRROR_BIN_DIR` (changes wrapper output dir)
+
+After adding clones, if wrappers are not found by name:
+
+```bash
+codex-mirror path setup
+```
+
+Then reload shell (example for bash):
+
+```bash
+. ~/.bashrc
+```
 
 ## Safety model
 

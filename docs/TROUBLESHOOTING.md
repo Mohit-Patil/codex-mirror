@@ -47,6 +47,21 @@ Checks:
   - `CODEX_MIRROR_BIN_DIR` env var
   - default `~/.local/bin`
 
+## Clone command not found on Ubuntu
+
+- Check whether wrapper bin dir is on PATH:
+  ```bash
+  node dist/cli.js path status
+  ```
+- Auto-configure your shell startup file:
+  ```bash
+  node dist/cli.js path setup
+  ```
+- Reload shell:
+  ```bash
+  . ~/.bashrc
+  ```
+
 ## Diagnostics says auth unknown
 
 - Run direct login status:

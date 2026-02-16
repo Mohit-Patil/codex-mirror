@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { CloneManager } from "./core/clone-manager.js";
 import { assertValidCloneName, sanitizeCloneName } from "./core/clone-name.js";
 import { resolveContext } from "./core/context.js";
 import { Doctor } from "./core/doctor.js";
 import { Launcher } from "./core/launcher.js";
+import { detectShell, ensurePathInShellRc, getPathStatus, isDirOnPath, resolveRcFile, ShellKind, sourceCommandFor } from "./core/path-setup.js";
 import { RegistryStore } from "./core/registry.js";
 import { WrapperManager, WrapperRunner } from "./core/wrapper-manager.js";
 import { runTui } from "./tui/index.js";
@@ -46,6 +48,7 @@ async function main(): Promise<void> {
       });
       console.log(`Created clone '${clone.name}' at ${clone.rootPath}`);
       console.log(`Wrapper: ${clone.wrapperPath}`);
+      printPathHintIfNeeded(context.defaultBinDir);
     });
 
   program
@@ -180,6 +183,64 @@ async function main(): Promise<void> {
         await cloneManager.saveClone(clone);
       }
       console.log(`Installed ${clones.length} wrapper(s) in ${targetDir}`);
+      printPathHintIfNeeded(targetDir);
+    });
+
+  const pathCommand = program.command("path").description("Check or configure shell PATH for clone wrappers");
+
+  pathCommand
+    .command("status")
+    .description("Show whether wrapper bin directory is on PATH")
+    .option("--bin-dir <path>", "Wrapper bin directory to check")
+    .option("--shell <kind>", "Target shell: bash|zsh|fish|sh")
+    .option("--rc-file <path>", "Shell RC file path override")
+    .action(async (options: { binDir?: string; shell?: string; rcFile?: string }) => {
+      const shell = parseShellKind(options.shell);
+      const status = await getPathStatus({
+        binDir: options.binDir ?? context.defaultBinDir,
+        shell,
+        rcFile: options.rcFile,
+      });
+
+      console.log(`Wrapper bin dir: ${status.normalizedBinDir}`);
+      console.log(`Shell: ${status.shell}`);
+      console.log(`RC file: ${status.rcFile}`);
+      console.log(`Managed block: ${status.hasManagedBlock ? "yes" : "no"}`);
+      console.log(`On PATH (current session): ${status.onPath ? "yes" : "no"}`);
+      if (!status.onPath) {
+        console.log("");
+        console.log("Run setup to configure shell PATH:");
+        console.log("  codex-mirror path setup");
+        console.log(`Then reload shell: ${sourceCommandFor(status.shell, status.rcFile)}`);
+      }
+    });
+
+  pathCommand
+    .command("setup")
+    .description("Append/update PATH setup block in your shell RC file")
+    .option("--bin-dir <path>", "Wrapper bin directory to add")
+    .option("--shell <kind>", "Target shell: bash|zsh|fish|sh")
+    .option("--rc-file <path>", "Shell RC file path override")
+    .action(async (options: { binDir?: string; shell?: string; rcFile?: string }) => {
+      const shell = parseShellKind(options.shell);
+      const binDir = options.binDir ?? context.defaultBinDir;
+      const result = await ensurePathInShellRc({
+        binDir,
+        shell,
+        rcFile: options.rcFile,
+      });
+      const status = await getPathStatus({
+        binDir,
+        shell: result.shell,
+        rcFile: result.rcFile,
+      });
+
+      console.log(`${result.changed ? "Updated" : "Already configured"}: ${result.rcFile}`);
+      if (status.onPath) {
+        console.log("PATH is already active in this session.");
+      } else {
+        console.log(`Reload shell now: ${result.sourceCommand}`);
+      }
     });
 
   const argv = process.argv.slice(2);
@@ -196,6 +257,7 @@ async function main(): Promise<void> {
       launcher,
       doctor,
       defaultCloneBaseDir: resolve(context.globalRoot, "clones"),
+      defaultBinDir: context.defaultBinDir,
     });
     return;
   }
@@ -244,6 +306,30 @@ function printDoctor(results: DoctorResult[]): void {
     }
     console.log("");
   }
+}
+
+function printPathHintIfNeeded(binDir: string): void {
+  if (isDirOnPath(binDir)) {
+    return;
+  }
+  const shell = detectShell(process.env.SHELL);
+  const rcFile = resolveRcFile(shell, process.env.HOME ?? homedir());
+  console.log("");
+  console.log(`PATH notice: wrappers are installed in ${binDir}`);
+  console.log("That directory is not on PATH in this session.");
+  console.log("Run: codex-mirror path setup");
+  console.log(`Then reload shell: ${sourceCommandFor(shell, rcFile)}`);
+}
+
+function parseShellKind(value: string | undefined): ShellKind | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "bash" || normalized === "zsh" || normalized === "fish" || normalized === "sh") {
+    return normalized;
+  }
+  throw new Error(`Unsupported shell '${value}'. Use one of: bash, zsh, fish, sh`);
 }
 
 async function resolveCliVersion(): Promise<string> {
