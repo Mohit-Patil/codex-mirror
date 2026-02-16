@@ -30,7 +30,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@inquirer/prompts": "^7.3.2",
+    "@inquirer/prompts": "^8.2.1",
     "commander": "^14.0.1"
   },
   "devDependencies": {
