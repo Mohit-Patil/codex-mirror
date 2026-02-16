@@ -1,6 +1,6 @@
 {
   "name": "codex-mirror",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local multi-account manager for Codex CLI with isolated runtime/auth state and TUI clone management.",
   "type": "module",
   "files": [

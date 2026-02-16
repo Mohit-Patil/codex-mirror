@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -6,6 +7,7 @@ import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 const cliEntry = resolve(process.cwd(), "src", "cli.ts");
+const packageVersion = (JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { version: string }).version;
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -42,7 +44,7 @@ describe("CLI smoke flow", () => {
 
       const version = await runCli(["--version"], env);
       expect(version.code).toBe(0);
-      expect(version.stdout.trim()).toMatch(/^0\.1\.0$/);
+      expect(version.stdout.trim()).toBe(packageVersion);
 
       const listJson = await runCli(["list", "--json"], env);
       expect(listJson.code).toBe(0);
