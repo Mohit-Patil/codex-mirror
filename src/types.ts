@@ -1,4 +1,5 @@
 export type RuntimeKind = "npm-package" | "binary";
+export type CloneTemplate = "official" | "minimax";
 
 export interface RuntimeInfo {
   kind: RuntimeKind;
@@ -11,6 +12,7 @@ export interface RuntimeInfo {
 export interface ClonePaths {
   cloneBaseDir: string;
   metadataPath: string;
+  secretsPath: string;
   runtimeDir: string;
   runtimeEntryPath: string;
   homeDir: string;
@@ -21,12 +23,14 @@ export interface ClonePaths {
 export interface CloneRecord {
   id: string;
   name: string;
+  template?: CloneTemplate;
   rootPath: string;
   runtimePath: string;
   runtimeEntryPath: string;
   runtimeKind: RuntimeKind;
   wrapperPath: string;
   codexVersionPinned: string;
+  defaultCodexArgs?: string[];
   createdAt: string;
   updatedAt: string;
 }

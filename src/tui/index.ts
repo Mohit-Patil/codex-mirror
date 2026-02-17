@@ -2,11 +2,12 @@ import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { CloneManager } from "../core/clone-manager.js";
 import { sanitizeCloneName, validateCloneName } from "../core/clone-name.js";
+import { templateLabel } from "../core/clone-template.js";
 import { Doctor } from "../core/doctor.js";
 import { Launcher } from "../core/launcher.js";
 import { detectShell, ensurePathInShellRc, getPathStatus, isDirOnPath, resolveRcFile, sourceCommandFor } from "../core/path-setup.js";
-import { CloneRecord, DoctorResult } from "../types.js";
-import { promptConfirm, promptMenu, promptText, renderPanel } from "./menu.js";
+import { CloneRecord, CloneTemplate, DoctorResult } from "../types.js";
+import { promptConfirm, promptMenu, promptSecret, promptText, renderPanel } from "./menu.js";
 
 interface TuiDeps {
   cloneManager: CloneManager;
@@ -93,10 +94,16 @@ export async function runTui(deps: TuiDeps): Promise<void> {
 }
 
 async function quickClone(deps: TuiDeps): Promise<void> {
+  const template = await promptCloneTemplateSelection({
+    title: "Quick Clone",
+    subtitle: "Name only, ready in seconds",
+    sectionTitle: "Step 1",
+  });
+
   const name = await promptText({
     title: "Quick Clone",
     subtitle: "Name only, ready in seconds",
-    sectionTitle: "Step 1 of 2",
+    sectionTitle: "Step 2",
     lines: ["Provide a clone name.", "Each clone gets isolated runtime and auth state."],
     label: "Clone name",
     footer: "Type name | Enter continue | Esc cancel",
@@ -105,12 +112,25 @@ async function quickClone(deps: TuiDeps): Promise<void> {
 
   const normalized = name.trim();
   const suggestedRoot = resolve(deps.defaultCloneBaseDir, sanitizeCloneName(normalized));
+  const minimaxApiKey =
+    template === "minimax"
+      ? await promptMiniMaxApiKey({
+          title: "Quick Clone",
+          subtitle: "MiniMax setup",
+        })
+      : undefined;
 
   const shouldCreate = await promptConfirm({
     title: "Quick Clone",
     subtitle: "Name only, ready in seconds",
-    sectionTitle: "Step 2 of 2",
-    lines: [`Name: ${normalized}`, `Storage: ${suggestedRoot}`, "Create this clone now?"],
+    sectionTitle: template === "minimax" ? "Step 4" : "Step 3",
+    lines: [
+      `Template: ${templateLabel(template)}`,
+      `Name: ${normalized}`,
+      `Storage: ${suggestedRoot}`,
+      ...(template === "minimax" ? [`API key: ${minimaxApiKey ? "set" : "not set"}`] : []),
+      "Create this clone now?",
+    ],
     footer: "Up/Down navigate | Enter select | Esc cancel",
     defaultValue: true,
   });
@@ -123,38 +143,53 @@ async function quickClone(deps: TuiDeps): Promise<void> {
   renderPanel({
     title: "Quick Clone",
     subtitle: "Working",
-    lines: ["Creating isolated runtime + wrapper...", "This can take a few seconds."],
+    lines: [`Creating ${templateLabel(template)} clone runtime + wrapper...`, "This can take a few seconds."],
     footer: "Please wait",
   });
 
-  const clone = await deps.cloneManager.createClone({ name: normalized, rootPath: suggestedRoot });
-
-  const doLogin = await promptConfirm({
-    title: "Quick Clone",
-    subtitle: "Optional login",
-    lines: ["Run 'codex login' for this clone now?"],
-    defaultValue: false,
-    confirmLabel: "Login now",
-    cancelLabel: "Skip",
+  const clone = await deps.cloneManager.createClone({
+    name: normalized,
+    rootPath: suggestedRoot,
+    template,
+    minimaxApiKey,
   });
 
-  if (doLogin) {
-    await deps.launcher.run(clone, ["login"]);
+  if ((clone.template ?? "official") === "official") {
+    const doLogin = await promptConfirm({
+      title: "Quick Clone",
+      subtitle: "Optional login",
+      lines: ["Run 'codex login' for this clone now?"],
+      defaultValue: false,
+      confirmLabel: "Login now",
+      cancelLabel: "Skip",
+    });
+
+    if (doLogin) {
+      await deps.launcher.run(clone, ["login"]);
+    }
   }
 
   await waitContinue("Clone Created", "Quick clone complete", [
     `Name: ${clone.name}`,
+    `Template: ${templateLabel(clone.template ?? "official")}`,
     `Path: ${clone.rootPath}`,
     `Wrapper: ${clone.wrapperPath}`,
+    ...buildTemplateNoticeLines(clone),
     ...buildPathNoticeLines(deps.defaultBinDir),
   ]);
 }
 
 async function createCloneWizard(deps: TuiDeps): Promise<void> {
+  const template = await promptCloneTemplateSelection({
+    title: "New Clone Wizard",
+    subtitle: "Guided clone creation",
+    sectionTitle: "Step 1",
+  });
+
   const name = await promptText({
     title: "New Clone Wizard",
     subtitle: "Guided clone creation",
-    sectionTitle: "Step 1 of 3",
+    sectionTitle: "Step 2",
     lines: ["Choose a clone name.", "Name must be filesystem-safe and unique."],
     label: "Clone name",
     footer: "Type name | Enter continue | Esc cancel",
@@ -163,12 +198,25 @@ async function createCloneWizard(deps: TuiDeps): Promise<void> {
 
   const normalized = name.trim();
   const suggestedRoot = resolve(deps.defaultCloneBaseDir, sanitizeCloneName(normalized));
+  const minimaxApiKey =
+    template === "minimax"
+      ? await promptMiniMaxApiKey({
+          title: "New Clone Wizard",
+          subtitle: "MiniMax setup",
+        })
+      : undefined;
 
   const shouldCreate = await promptConfirm({
     title: "New Clone Wizard",
     subtitle: "Guided clone creation",
-    sectionTitle: "Step 2 of 3",
-    lines: [`Name: ${normalized}`, `Storage: ${suggestedRoot}`, "Create this clone now?"],
+    sectionTitle: template === "minimax" ? "Step 4" : "Step 3",
+    lines: [
+      `Template: ${templateLabel(template)}`,
+      `Name: ${normalized}`,
+      `Storage: ${suggestedRoot}`,
+      ...(template === "minimax" ? [`API key: ${minimaxApiKey ? "set" : "not set"}`] : []),
+      "Create this clone now?",
+    ],
     footer: "Up/Down navigate | Enter select | Esc cancel",
     defaultValue: true,
   });
@@ -181,30 +229,39 @@ async function createCloneWizard(deps: TuiDeps): Promise<void> {
   renderPanel({
     title: "New Clone Wizard",
     subtitle: "Guided clone creation",
-    sectionTitle: "Step 3 of 3",
+    sectionTitle: template === "minimax" ? "Step 5" : "Step 4",
     lines: ["Creating isolated runtime + state folders...", "This can take a few seconds."],
     footer: "Please wait",
   });
 
-  const clone = await deps.cloneManager.createClone({ name: normalized, rootPath: suggestedRoot });
-
-  const doLogin = await promptConfirm({
-    title: "New Clone Wizard",
-    subtitle: "Optional login",
-    lines: ["Run 'codex login' for this clone now?"],
-    defaultValue: false,
-    confirmLabel: "Login now",
-    cancelLabel: "Skip",
+  const clone = await deps.cloneManager.createClone({
+    name: normalized,
+    rootPath: suggestedRoot,
+    template,
+    minimaxApiKey,
   });
 
-  if (doLogin) {
-    await deps.launcher.run(clone, ["login"]);
+  if ((clone.template ?? "official") === "official") {
+    const doLogin = await promptConfirm({
+      title: "New Clone Wizard",
+      subtitle: "Optional login",
+      lines: ["Run 'codex login' for this clone now?"],
+      defaultValue: false,
+      confirmLabel: "Login now",
+      cancelLabel: "Skip",
+    });
+
+    if (doLogin) {
+      await deps.launcher.run(clone, ["login"]);
+    }
   }
 
   await waitContinue("Clone Created", "Wizard complete", [
     `Name: ${clone.name}`,
+    `Template: ${templateLabel(clone.template ?? "official")}`,
     `Path: ${clone.rootPath}`,
     `Wrapper: ${clone.wrapperPath}`,
+    ...buildTemplateNoticeLines(clone),
     ...buildPathNoticeLines(deps.defaultBinDir),
   ]);
 }
@@ -242,7 +299,7 @@ async function manageClones(deps: TuiDeps, healthCache: Map<string, DoctorResult
           const health = cached ? (cached.ok ? "OK" : "ISSUE") : "UNKNOWN";
           const auth = cached?.authStatus ?? "unknown";
           return {
-            label: `${clone.name} [${health}] [${auth}]`,
+            label: `${clone.name} [${clone.template ?? "official"}] [${health}] [${auth}]`,
             value: clone.name,
             description: `${clone.codexVersionPinned} · ${shortenPathForDisplay(clone.rootPath, 34)}`,
           };
@@ -273,11 +330,17 @@ async function manageCloneActions(
   while (true) {
     const action = await promptMenu<string>({
       title: `Clone: ${clone.name}`,
-      subtitle: `${shortenPathForDisplay(clone.rootPath, 68)} · Codex ${clone.codexVersionPinned}`,
-      statusLines: [`Wrapper: ${shortenPathForDisplay(clone.wrapperPath, 68)}`],
+      subtitle: `${shortenPathForDisplay(clone.rootPath, 68)} · Codex ${clone.codexVersionPinned} · ${templateLabel(clone.template ?? "official")}`,
+      statusLines: [
+        `Wrapper: ${shortenPathForDisplay(clone.wrapperPath, 68)}`,
+        ...(clone.defaultCodexArgs && clone.defaultCodexArgs.length > 0
+          ? [`Default args: ${clone.defaultCodexArgs.join(" ")}`]
+          : []),
+      ],
       items: [
         { label: "Run (interactive)", value: "run" },
         { label: "Run with args", value: "run-args" },
+        ...(clone.template === "minimax" ? [{ label: "Set MiniMax API key", value: "set-minimax-key" }] : []),
         { label: "Login", value: "login" },
         { label: "Logout", value: "logout" },
         { label: "Doctor", value: "doctor" },
@@ -308,6 +371,21 @@ async function manageCloneActions(
 
     if (action === "login") {
       await deps.launcher.run(clone, ["login"]);
+      continue;
+    }
+
+    if (action === "set-minimax-key") {
+      const apiKey = await promptSecret({
+        title: `Clone: ${clone.name}`,
+        subtitle: "MiniMax key setup",
+        lines: ["Paste MINIMAX_API_KEY. It is stored in clone-local secrets (0600)."],
+        label: "MINIMAX_API_KEY",
+        footer: "Paste key | Enter save | Esc cancel",
+        validate: (value) => (value.trim().length > 0 ? true : "API key cannot be empty"),
+      });
+      const updated = await deps.cloneManager.setMiniMaxApiKey(clone.name, apiKey);
+      clone.updatedAt = updated.updatedAt;
+      await waitContinue("MiniMax Key Saved", clone.name, ["Key updated for this clone."]);
       continue;
     }
 
@@ -531,7 +609,7 @@ function buildDashboardStatusLines(
     const result = healthCache.get(clone.name);
     const health = result ? (result.ok ? "OK" : "ISSUE") : "UNKNOWN";
     const auth = result?.authStatus ?? "unknown";
-    lines.push(`- ${clone.name} [${health}] [${auth}] ${shortenPathForDisplay(clone.rootPath, 34)}`);
+    lines.push(`- ${clone.name} [${clone.template ?? "official"}] [${health}] [${auth}] ${shortenPathForDisplay(clone.rootPath, 34)}`);
   }
 
   return lines;
@@ -574,6 +652,7 @@ function printAbout(): void {
       "Creates centrally-managed isolated Codex clones.",
       "Each clone has its own auth/session/config state.",
       "Runtime is pinned per clone and updated on demand.",
+      "Templates support official Codex and MiniMax presets.",
       "Diagnostics checks runtime, wrapper, writable paths, and auth status.",
       "Shell PATH Setup writes a managed PATH block in your shell RC file.",
       "Use Quick Clone for fastest flow, Wizard for guided setup.",
@@ -666,6 +745,77 @@ function isUserAbort(error: unknown): boolean {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function promptCloneTemplateSelection(options: {
+  title: string;
+  subtitle: string;
+  sectionTitle: string;
+}): Promise<CloneTemplate> {
+  return promptMenu<CloneTemplate>({
+    title: options.title,
+    subtitle: options.subtitle,
+    summaryTitle: "[ Template ]",
+    statusLines: ["Pick a clone template/provider preset."],
+    actionsTitle: options.sectionTitle,
+    items: [
+      {
+        label: "Official Codex",
+        value: "official",
+        description: "Default OpenAI login flow",
+      },
+      {
+        label: "MiniMax",
+        value: "minimax",
+        description: "Preconfigured provider profile + MINIMAX_API_KEY",
+      },
+    ],
+    footer: "Up/Down navigate | Enter select | Esc cancel",
+  });
+}
+
+async function promptMiniMaxApiKey(options: { title: string; subtitle: string }): Promise<string | undefined> {
+  const shouldPaste = await promptConfirm({
+    title: options.title,
+    subtitle: options.subtitle,
+    sectionTitle: "Step 3",
+    lines: [
+      "Do you want to paste MINIMAX_API_KEY now?",
+      "Saved key is clone-local and used automatically at runtime.",
+    ],
+    defaultValue: true,
+    confirmLabel: "Paste now",
+    cancelLabel: "Skip",
+  });
+
+  if (!shouldPaste) {
+    return undefined;
+  }
+
+  return promptSecret({
+    title: options.title,
+    subtitle: options.subtitle,
+    sectionTitle: "Step 3",
+    lines: ["Paste your MINIMAX_API_KEY."],
+    label: "MINIMAX_API_KEY",
+    footer: "Paste key | Enter continue | Esc cancel",
+    validate: (value) => (value.trim().length > 0 ? true : "API key cannot be empty"),
+  });
+}
+
+function buildTemplateNoticeLines(clone: CloneRecord): string[] {
+  if ((clone.template ?? "official") !== "minimax") {
+    return [];
+  }
+
+  const lines = [
+    "Template note: MiniMax profile is configured for this clone.",
+    "MINIMAX_API_KEY can be set at creation or from Manage Clones.",
+  ];
+  if (clone.defaultCodexArgs && clone.defaultCodexArgs.length > 0) {
+    lines.push(`Auto args: ${clone.defaultCodexArgs.join(" ")}`);
+  }
+  return lines;
 }
 
 function buildPathNoticeLines(binDir: string): string[] {

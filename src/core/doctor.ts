@@ -1,6 +1,8 @@
 import { CloneRecord, DoctorResult } from "../types.js";
 import { exists, isFile, isWritable } from "../utils/fs.js";
+import { readCloneSecrets } from "./clone-secrets.js";
 import { deriveClonePaths } from "./clone-manager.js";
+import { MINIMAX_RECOMMENDED_CODEX_VERSION } from "./clone-template.js";
 import { Launcher } from "./launcher.js";
 
 export class Doctor {
@@ -54,7 +56,21 @@ export class Doctor {
     }
 
     if (authStatus === "unknown") {
-      errors.push("Could not determine auth status");
+      if ((clone.template ?? "official") !== "minimax") {
+        errors.push("Could not determine auth status");
+      }
+    }
+
+    if ((clone.template ?? "official") === "minimax") {
+      const secrets = await readCloneSecrets(paths);
+      if (!secrets.MINIMAX_API_KEY && !process.env.MINIMAX_API_KEY) {
+        errors.push("MiniMax API key is missing. Set MINIMAX_API_KEY in clone setup or shell.");
+      }
+      if (clone.codexVersionPinned !== MINIMAX_RECOMMENDED_CODEX_VERSION) {
+        errors.push(
+          `MiniMax template expects Codex ${MINIMAX_RECOMMENDED_CODEX_VERSION}; run 'codex-mirror update ${clone.name}'`,
+        );
+      }
     }
 
     const writable = writableChecks.every((check) => check.exists && check.writable);

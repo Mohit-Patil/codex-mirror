@@ -15,9 +15,16 @@
   - Transaction and rollback boundaries.
 - `src/core/runtime-cloner.ts`
   - Detects installed Codex and copies runtime into clone-local runtime dir.
+  - Supports template-driven version pinning (e.g., MiniMax pinned runtime install from npm).
 - `src/core/wrapper-manager.ts`
   - Creates/removes wrapper scripts in configured bin dir.
   - Enforces path confinement for wrapper outputs.
+- `src/core/clone-template.ts`
+  - Applies template-specific bootstrap behavior at clone creation.
+  - Example: MiniMax config profile and default launch args.
+- `src/core/clone-secrets.ts`
+  - Stores clone-local provider secrets (`secrets.json`, mode 0600).
+  - Injects env vars at launch time for that clone only.
 - `src/core/registry.ts`
   - Global clone registry (`registry.json`).
   - Locking and atomic write strategy for concurrency safety.

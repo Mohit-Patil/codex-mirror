@@ -73,6 +73,33 @@ Checks:
   node dist/cli.js doctor <clone>
   ```
 
+## MiniMax clone fails immediately
+
+- In TUI, open `Manage Clones` -> `<clone>` -> `Set MiniMax API key`.
+- Ensure clone runtime is re-pinned to MiniMax compatible Codex:
+  ```bash
+  node dist/cli.js update <clone>
+  ```
+- Confirm clone template and default args:
+  ```bash
+  node dist/cli.js list --full
+  ```
+- If needed, inspect clone-local Codex config:
+  ```bash
+  cat ~/.codex-mirror/clones/<clone-name>/.codex-mirror/home/.codex/config.toml
+  ```
+- If error contains:
+  - `unknown model 'codex-minimax-m2.5'`
+  - run update so compatibility migration rewrites legacy model ids:
+    ```bash
+    node dist/cli.js update <clone>
+    ```
+  - then verify:
+    ```bash
+    rg -n 'model\\s*=\\s*\"' ~/.codex-mirror/clones/<clone-name>/.codex-mirror/home/.codex/config.toml
+    ```
+    Expected default profile model: `MiniMax-M2.5`.
+
 ## Registry lock timeout
 
 - Usually caused by another active mirror command.

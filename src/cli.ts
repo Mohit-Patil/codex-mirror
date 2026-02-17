@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { CloneManager } from "./core/clone-manager.js";
 import { assertValidCloneName, sanitizeCloneName } from "./core/clone-name.js";
+import { parseCloneTemplate, templateLabel } from "./core/clone-template.js";
 import { resolveContext } from "./core/context.js";
 import { Doctor } from "./core/doctor.js";
 import { Launcher } from "./core/launcher.js";
@@ -37,17 +38,34 @@ async function main(): Promise<void> {
     .description("Create a new clone")
     .requiredOption("--name <name>", "Clone name")
     .option("--root <path>", "Advanced: custom clone storage directory (default: ~/.codex-mirror/clones/<name>)")
-    .action(async (options: { name: string; root?: string }) => {
+    .option("--provider <provider>", "Clone template/provider: official|minimax")
+    .option("--template <template>", "Alias of --provider")
+    .option("--minimax-api-key <key>", "MiniMax API key for minimax template clones")
+    .action(async (options: { name: string; root?: string; provider?: string; template?: string; minimaxApiKey?: string }) => {
       const cloneName = assertValidCloneName(options.name);
+      const template = parseCloneTemplate(options.template ?? options.provider);
       const rootPath = options.root
         ? options.root
         : resolve(context.globalRoot, "clones", sanitizeCloneName(cloneName));
       const clone = await cloneManager.createClone({
         name: cloneName,
         rootPath,
+        template,
+        minimaxApiKey: options.minimaxApiKey,
       });
       console.log(`Created clone '${clone.name}' at ${clone.rootPath}`);
+      console.log(`Template: ${templateLabel(clone.template ?? "official")}`);
       console.log(`Wrapper: ${clone.wrapperPath}`);
+      if (clone.defaultCodexArgs && clone.defaultCodexArgs.length > 0) {
+        console.log(`Default launch args: ${clone.defaultCodexArgs.join(" ")}`);
+      }
+      if ((clone.template ?? "official") === "minimax") {
+        if (options.minimaxApiKey?.trim()) {
+          console.log("MiniMax API key saved in clone-local secrets.");
+        } else {
+          console.log("Note: export MINIMAX_API_KEY before running this clone, or set it in TUI.");
+        }
+      }
       printPathHintIfNeeded(context.defaultBinDir);
     });
 
@@ -71,10 +89,14 @@ async function main(): Promise<void> {
       if (options.full) {
         for (const clone of clones) {
           console.log(`${clone.name}`);
+          console.log(`  template: ${clone.template ?? "official"}`);
           console.log(`  root: ${clone.rootPath}`);
           console.log(`  version: ${clone.codexVersionPinned}`);
           console.log(`  runtime: ${clone.runtimeEntryPath}`);
           console.log(`  wrapper: ${clone.wrapperPath}`);
+          if (clone.defaultCodexArgs && clone.defaultCodexArgs.length > 0) {
+            console.log(`  defaultArgs: ${clone.defaultCodexArgs.join(" ")}`);
+          }
           console.log(`  created: ${clone.createdAt}`);
           console.log(`  updated: ${clone.updatedAt}`);
           console.log("");
@@ -83,7 +105,7 @@ async function main(): Promise<void> {
       }
 
       for (const clone of clones) {
-        console.log(`${clone.name}\t${clone.codexVersionPinned}\t${clone.rootPath}`);
+        console.log(`${clone.name}\t${clone.template ?? "official"}\t${clone.codexVersionPinned}\t${clone.rootPath}`);
       }
     });
 

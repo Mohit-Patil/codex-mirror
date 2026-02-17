@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { ClonePaths, CloneRecord } from "../types.js";
+import { ClonePaths, CloneRecord, CloneTemplate } from "../types.js";
 import { copyDir, ensureDir, exists, removePath, writeJsonFile } from "../utils/fs.js";
 import { assertValidCloneName } from "./clone-name.js";
+import { buildMiniMaxSecrets, writeCloneSecrets } from "./clone-secrets.js";
+import {
+  applyCloneTemplate,
+  ensureMiniMaxConfigCompatibility,
+  parseCloneTemplate,
+  resolveTemplateRuntimePin,
+} from "./clone-template.js";
 import { installRuntime } from "./runtime-cloner.js";
 import { RegistryStore } from "./registry.js";
 import { WrapperManager } from "./wrapper-manager.js";
@@ -10,6 +17,8 @@ import { WrapperManager } from "./wrapper-manager.js";
 export interface CreateCloneOptions {
   name: string;
   rootPath: string;
+  template?: CloneTemplate;
+  minimaxApiKey?: string;
 }
 
 export class CloneManager {
@@ -34,6 +43,7 @@ export class CloneManager {
 
   async createClone(options: CreateCloneOptions): Promise<CloneRecord> {
     const name = assertValidCloneName(options.name);
+    const template = parseCloneTemplate(options.template);
 
     const existing = await this.registry.findByName(name);
     if (existing) {
@@ -57,26 +67,36 @@ export class CloneManager {
       await ensureDir(paths.homeDir);
       await ensureDir(paths.codexHomeDir);
       await ensureDir(paths.logsDir);
+      const templateSetup = await applyCloneTemplate(template, paths.codexHomeDir);
       rollbackCloneBase = true;
 
-      const runtime = await installRuntime(paths.runtimeDir);
+      const runtime = await installRuntime(paths.runtimeDir, {
+        pinnedVersion: resolveTemplateRuntimePin(template),
+      });
       const now = new Date().toISOString();
 
       clone = {
         id: randomUUID(),
         name,
+        template,
         rootPath,
         runtimePath: paths.runtimeDir,
         runtimeEntryPath: runtime.entryPath,
         runtimeKind: runtime.kind,
         wrapperPath: this.wrappers.getPathForClone(name),
         codexVersionPinned: runtime.version,
+        defaultCodexArgs: templateSetup.defaultCodexArgs,
         createdAt: now,
         updatedAt: now,
       };
 
       clone.wrapperPath = await this.wrappers.installWrapper(clone);
       wrapperInstalled = true;
+
+      if (template === "minimax") {
+        const secrets = buildMiniMaxSecrets(options.minimaxApiKey);
+        await writeCloneSecrets(paths, secrets);
+      }
 
       await this.writeCloneMetadata(clone);
       metadataWritten = true;
@@ -130,7 +150,9 @@ export class CloneManager {
         backupExists = true;
       }
 
-      const runtime = await installRuntime(current.runtimePath);
+      const runtime = await installRuntime(current.runtimePath, {
+        pinnedVersion: resolveTemplateRuntimePin(current.template ?? "official"),
+      });
       const updated: CloneRecord = {
         ...current,
         runtimeEntryPath: runtime.entryPath,
@@ -138,6 +160,12 @@ export class CloneManager {
         codexVersionPinned: runtime.version,
         updatedAt: new Date().toISOString(),
       };
+
+      if ((current.template ?? "official") === "minimax") {
+        const paths = deriveClonePaths(current.rootPath);
+        await ensureMiniMaxConfigCompatibility(paths.codexHomeDir);
+      }
+
       updated.wrapperPath = await this.wrappers.installWrapper(updated);
 
       await this.writeCloneMetadata(updated);
@@ -227,6 +255,22 @@ export class CloneManager {
     await this.registry.upsert(clone);
   }
 
+  async setMiniMaxApiKey(name: string, apiKey: string): Promise<CloneRecord> {
+    const clone = await this.getClone(name);
+    if ((clone.template ?? "official") !== "minimax") {
+      throw new Error(`Clone '${name}' is not a MiniMax template clone`);
+    }
+
+    const paths = deriveClonePaths(clone.rootPath);
+    await writeCloneSecrets(paths, buildMiniMaxSecrets(apiKey));
+    const updated: CloneRecord = {
+      ...clone,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.saveClone(updated);
+    return updated;
+  }
+
   private async writeCloneMetadata(clone: CloneRecord): Promise<void> {
     const paths = deriveClonePaths(clone.rootPath);
     await writeJsonFile(paths.metadataPath, clone);
@@ -259,6 +303,7 @@ export function deriveClonePaths(rootPath: string): ClonePaths {
   return {
     cloneBaseDir,
     metadataPath: resolve(cloneBaseDir, "clone.json"),
+    secretsPath: resolve(cloneBaseDir, "secrets.json"),
     runtimeDir,
     runtimeEntryPath: resolve(runtimeDir, "bin", "codex"),
     homeDir,
