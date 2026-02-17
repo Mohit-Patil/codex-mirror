@@ -28,6 +28,7 @@ npm version patch
    ```
 2. `Release` workflow runs on `v*` tags.
 3. Workflow verifies package and publishes to npm.
+4. Workflow creates or updates a GitHub Release entry for the same tag with generated notes.
 
 ## Dry run
 
