@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,6 +44,34 @@ describe("WrapperManager", () => {
     expect(() => manager.getPathForClone("../evil")).toThrow("path separators");
     await expect(manager.removeWrapper("../evil")).rejects.toThrow("path separators");
   });
+
+  it("runs wrapper with no runner args under nounset mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-wrapper-"));
+    tempDirs.push(root);
+
+    const runnerPath = join(root, "runner.sh");
+    await installFakeRunner(runnerPath);
+
+    const manager = new WrapperManager(join(root, "bin"), {
+      command: runnerPath,
+      args: [],
+    });
+
+    const clone = sampleClone("beta", root);
+    const wrapperPath = await manager.installWrapper(clone);
+    const argsOutputPath = join(root, "runner-args.txt");
+
+    const result = await runExecutable(wrapperPath, ["--model", "o3"], {
+      ...process.env,
+      RUNNER_OUT: argsOutputPath,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).not.toContain("unbound variable");
+
+    const receivedArgs = (await readFile(argsOutputPath, "utf8")).trim().split("\n");
+    expect(receivedArgs).toEqual(["run", "beta", "--", "--model", "o3"]);
+  });
 });
 
 function sampleClone(name: string, root: string): CloneRecord {
@@ -59,4 +88,50 @@ function sampleClone(name: string, root: string): CloneRecord {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+async function installFakeRunner(path: string): Promise<void> {
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+out="\${RUNNER_OUT:?}"
+: > "$out"
+for arg in "$@"; do
+  printf "%s\\n" "$arg" >> "$out"
+done
+`;
+  await writeFile(path, script, "utf8");
+  await chmod(path, 0o755);
+}
+
+async function runExecutable(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(command, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    });
+
+    child.stderr.on("data", (chunk: Buffer | string) => {
+      stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolveResult({
+        code: code ?? 1,
+        stdout,
+        stderr,
+      });
+    });
+  });
 }

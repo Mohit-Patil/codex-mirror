@@ -60,7 +60,10 @@ if [[ -n \"\${CODEX_MIRROR_CLI:-}\" ]]; then
 fi
 RUNNER_CMD=${commandLiteral}
 ${arrayDecl}
-exec \"$RUNNER_CMD\" \"\${RUNNER_ARGS[@]}\" run ${nameLiteral} -- \"$@\"
+if (( \${#RUNNER_ARGS[@]} > 0 )); then
+  exec \"$RUNNER_CMD\" \"\${RUNNER_ARGS[@]}\" run ${nameLiteral} -- \"$@\"
+fi
+exec \"$RUNNER_CMD\" run ${nameLiteral} -- \"$@\"
 `;
 }
 
