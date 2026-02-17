@@ -36,11 +36,21 @@ describe("CLI smoke flow", () => {
         HOME: join(sandbox, "user-home"),
         CODEX_MIRROR_HOME: join(sandbox, "mirror-home"),
         CODEX_MIRROR_BIN_DIR: join(sandbox, "wrapper-bin"),
+        CODEX_MIRROR_DISABLE_MINIMAX_RUNTIME_PIN: "1",
       };
 
       const create = await runCli(["create", "--name", "smoke"], env);
       expect(create.code).toBe(0);
       expect(create.stdout).toContain("Created clone 'smoke'");
+
+      const createMiniMax = await runCli(
+        ["create", "--name", "mini", "--provider", "minimax", "--minimax-api-key", "mini-test-key"],
+        env,
+      );
+      expect(createMiniMax.code).toBe(0);
+      expect(createMiniMax.stdout).toContain("Template: MiniMax");
+      expect(createMiniMax.stdout).toContain("Default launch args: --profile m21");
+      expect(createMiniMax.stdout).toContain("MiniMax API key saved in clone-local secrets.");
 
       const version = await runCli(["--version"], env);
       expect(version.code).toBe(0);
@@ -49,8 +59,38 @@ describe("CLI smoke flow", () => {
       const listJson = await runCli(["list", "--json"], env);
       expect(listJson.code).toBe(0);
       const listed = JSON.parse(listJson.stdout) as Array<{ name: string }>;
-      expect(listed).toHaveLength(1);
-      expect(listed[0]?.name).toBe("smoke");
+      expect(listed).toHaveLength(2);
+      expect(listed.map((item) => item.name)).toContain("smoke");
+      expect(listed.map((item) => item.name)).toContain("mini");
+
+      const miniConfigPath = join(
+        env.CODEX_MIRROR_HOME!,
+        "clones",
+        "mini",
+        ".codex-mirror",
+        "home",
+        ".codex",
+        "config.toml",
+      );
+      const miniConfig = await readFile(miniConfigPath, "utf8");
+      expect(miniConfig).toContain("[model_providers.minimax]");
+      expect(miniConfig).toContain('wire_api = "chat"');
+      expect(miniConfig).toContain("[profiles.minimax]");
+      expect(miniConfig).toContain("[profiles.m21]");
+      expect(miniConfig).toContain('model = "MiniMax-M2.5"');
+
+      const miniSecretsPath = join(env.CODEX_MIRROR_HOME!, "clones", "mini", ".codex-mirror", "secrets.json");
+      const miniSecrets = await readFile(miniSecretsPath, "utf8");
+      expect(miniSecrets).toContain("\"MINIMAX_API_KEY\": \"mini-test-key\"");
+
+      const miniRun = await runCli(["run", "mini"], env);
+      expect(miniRun.code).toBe(0);
+      expect(miniRun.stdout).toContain("Fake codex run: --profile m21");
+      expect(miniRun.stdout).toContain("MINIMAX_API_KEY_SET=1");
+
+      const miniExec = await runCli(["run", "mini", "--", "exec", "hello"], env);
+      expect(miniExec.code).toBe(0);
+      expect(miniExec.stdout).toContain("Fake codex run: exec --profile m21 hello");
 
       const rcFile = join(sandbox, ".bashrc");
       const pathStatus = await runCli(
@@ -85,6 +125,10 @@ describe("CLI smoke flow", () => {
       const remove = await runCli(["remove", "smoke"], env);
       expect(remove.code).toBe(0);
       expect(remove.stdout).toContain("Removed clone 'smoke'");
+
+      const removeMini = await runCli(["remove", "mini"], env);
+      expect(removeMini.code).toBe(0);
+      expect(removeMini.stdout).toContain("Removed clone 'mini'");
 
       const listAfter = await runCli(["list"], env);
       expect(listAfter.code).toBe(0);
@@ -129,6 +173,9 @@ if [[ "$cmd" == "logout" ]]; then
 fi
 
 echo "Fake codex run: $*"
+if [[ -n "\${MINIMAX_API_KEY:-}" ]]; then
+  echo "MINIMAX_API_KEY_SET=1"
+fi
 exit 0
 `;
   await writeFile(path, script, "utf8");

@@ -1,4 +1,4 @@
-import { confirm, input, select } from "@inquirer/prompts";
+import { confirm, input, password, select } from "@inquirer/prompts";
 
 export interface MenuItem<T> {
   label: string;
@@ -35,6 +35,17 @@ export interface TextPromptOptions {
   footer?: string;
   initialValue?: string;
   validate?: (value: string) => true | string;
+}
+
+export interface SecretPromptOptions {
+  title: string;
+  subtitle?: string;
+  sectionTitle?: string;
+  lines?: string[];
+  label: string;
+  footer?: string;
+  validate?: (value: string) => true | string;
+  mask?: string;
 }
 
 export interface ConfirmPromptOptions {
@@ -144,6 +155,70 @@ export async function promptText(options: TextPromptOptions): Promise<string> {
 
     session.render(() => {
       const lines = buildTextPromptLines(options, value, errorLine);
+      return renderFrame(lines, process.stdout.columns ?? 100);
+    });
+
+    session.onKey((key) => {
+      if (Date.now() - mountedAt < 140 && key.kind === "enter") {
+        return;
+      }
+
+      if (key.kind === "ctrl-c" || key.kind === "escape") {
+        session.reject(new Error("Aborted by user"));
+        return;
+      }
+
+      if (key.kind === "backspace") {
+        if (value.length > 0) {
+          value = value.slice(0, -1);
+          errorLine = undefined;
+          session.repaint();
+        }
+        return;
+      }
+
+      if (key.kind === "char") {
+        if (isPrintableCharacter(key.value)) {
+          value += key.value;
+          errorLine = undefined;
+          session.repaint();
+        }
+        return;
+      }
+
+      if (key.kind === "enter") {
+        if (options.validate) {
+          const result = options.validate(value);
+          if (result !== true) {
+            errorLine = result;
+            session.repaint();
+            return;
+          }
+        }
+        session.resolve(value);
+      }
+    });
+  });
+}
+
+export async function promptSecret(options: SecretPromptOptions): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return password({
+      message: options.label,
+      validate: options.validate,
+      mask: options.mask ?? "*",
+    });
+  }
+
+  return runRawSession<string>((session) => {
+    let value = "";
+    let errorLine: string | undefined;
+    const mountedAt = Date.now();
+    const mask = options.mask ?? "*";
+
+    session.render(() => {
+      const masked = value.length > 0 ? mask.repeat(value.length) : "";
+      const lines = buildSecretPromptLines(options, masked, errorLine);
       return renderFrame(lines, process.stdout.columns ?? 100);
     });
 
@@ -348,7 +423,7 @@ function buildMenuLines<T>(options: MenuOptions<T>, selected: number): string[] 
     lines.push(styleMuted(`  ${options.subtitle}`));
   }
   if (options.title === "CODEX MIRROR") {
-    lines.push(styleMuted("  Official Codex clone manager"));
+    lines.push(styleMuted("  Codex clone manager with provider templates"));
   }
 
   lines.push("─");
@@ -409,6 +484,36 @@ function buildTextPromptLines(options: TextPromptOptions, value: string, errorLi
 
   lines.push("─");
   lines.push(styleMuted(options.footer ?? "Type to edit | Enter continue | Esc cancel"));
+  return lines;
+}
+
+function buildSecretPromptLines(options: SecretPromptOptions, maskedValue: string, errorLine?: string): string[] {
+  const lines: string[] = [];
+
+  lines.push(styleBrand(options.title));
+  if (options.subtitle) {
+    lines.push(styleMuted(`  ${options.subtitle}`));
+  }
+
+  lines.push("─");
+  if (options.sectionTitle) {
+    lines.push(styleSection(`[ ${options.sectionTitle} ]`));
+  }
+  if (options.lines && options.lines.length > 0) {
+    for (const line of options.lines) {
+      lines.push(`  ${line}`);
+    }
+  }
+
+  lines.push("─");
+  lines.push(styleSection(`[ ${options.label} ]`));
+  lines.push(`  ${maskedValue}${styleMuted("_")}`);
+  if (errorLine) {
+    lines.push(styleError(`  ${errorLine}`));
+  }
+
+  lines.push("─");
+  lines.push(styleMuted(options.footer ?? "Paste value | Enter continue | Esc cancel"));
   return lines;
 }
 

@@ -1,13 +1,16 @@
 # Roadmap
 
-## Current: Phase 1 (official Codex only)
+## Current: Phase 1.5 (official Codex + template presets)
 
 - Centralized clone manager for Codex.
 - Isolated auth/session/runtime per clone.
 - TUI and CLI management.
 - Safety hardening (validation, confinement, locking, rollback).
+- Template presets for clone setup:
+  - `official` (default)
+  - `minimax` (profile/config bootstrap)
 
-## Next: Phase 2 (provider extensibility)
+## Next: Phase 2 (full provider extensibility)
 
 Planned direction:
 

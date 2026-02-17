@@ -90,6 +90,25 @@ describe("Doctor", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.some((error) => error.includes("timed out"))).toBe(true);
   });
+
+  it("for minimax template reports missing key instead of auth parsing error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-doctor-"));
+    tempDirs.push(root);
+
+    const clone = await createCloneFixture(root, "minimax");
+    clone.template = "minimax";
+    const launcher = {
+      run: async () => 1,
+      capture: async () => ({ code: 1, stdout: "", stderr: "provider mode", timedOut: false }),
+    };
+
+    const doctor = new Doctor(launcher as never, 25);
+    const result = await doctor.checkOne(clone);
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.some((error) => error.includes("MiniMax API key is missing"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("Could not determine auth status"))).toBe(false);
+  });
 });
 
 async function createCloneFixture(root: string, name: string): Promise<CloneRecord> {

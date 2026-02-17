@@ -4,11 +4,17 @@ import { RuntimeInfo } from "../types.js";
 import { copyDir, copyFile, ensureDir, exists, removePath } from "../utils/fs.js";
 import { findCommand, runCaptureSync } from "../utils/process.js";
 
+const CODEX_NPM_PACKAGE = "@openai/codex";
+
 interface InstalledCodex {
   codexPath: string;
   version: string;
   kind: "npm-package" | "binary";
   sourcePath: string;
+}
+
+export interface InstallRuntimeOptions {
+  pinnedVersion?: string;
 }
 
 export async function detectInstalledCodex(): Promise<InstalledCodex> {
@@ -37,7 +43,11 @@ export async function detectInstalledCodex(): Promise<InstalledCodex> {
   };
 }
 
-export async function installRuntime(runtimeDir: string): Promise<RuntimeInfo> {
+export async function installRuntime(runtimeDir: string, options: InstallRuntimeOptions = {}): Promise<RuntimeInfo> {
+  if (options.pinnedVersion && options.pinnedVersion.trim().length > 0) {
+    return installRuntimeFromPinnedVersion(runtimeDir, options.pinnedVersion.trim());
+  }
+
   const installed = await detectInstalledCodex();
 
   await removePath(runtimeDir);
@@ -74,6 +84,48 @@ export async function installRuntime(runtimeDir: string): Promise<RuntimeInfo> {
   };
 }
 
+async function installRuntimeFromPinnedVersion(runtimeDir: string, version: string): Promise<RuntimeInfo> {
+  await removePath(runtimeDir);
+  await ensureDir(runtimeDir);
+
+  const packageRoot = join(runtimeDir, "package");
+  await ensureDir(packageRoot);
+
+  const installResult = runCaptureSync(
+    "npm",
+    [
+      "install",
+      "--prefix",
+      packageRoot,
+      "--no-package-lock",
+      "--omit=dev",
+      "--no-audit",
+      "--no-fund",
+      `${CODEX_NPM_PACKAGE}@${version}`,
+    ],
+    process.env,
+  );
+
+  if (installResult.code !== 0) {
+    const tail = `${installResult.stdout}\n${installResult.stderr}`.trim().split(/\r?\n/).slice(-20).join("\n");
+    throw new Error(`Failed to install pinned Codex ${version} from npm.\n${tail}`);
+  }
+
+  const packageDir = resolveInstalledPackageDir(packageRoot, CODEX_NPM_PACKAGE);
+  const entryPath = join(packageDir, "bin", "codex.js");
+  if (!(await exists(entryPath))) {
+    throw new Error(`Pinned Codex install is missing entry script: ${entryPath}`);
+  }
+
+  return {
+    kind: "npm-package",
+    entryPath,
+    sourcePath: packageDir,
+    version,
+    sourceCodexPath: `npm:${CODEX_NPM_PACKAGE}@${version}`,
+  };
+}
+
 function detectCodexVersion(codexPath: string): string {
   const result = runCaptureSync(codexPath, ["-V"], process.env);
   const joined = `${result.stdout}\n${result.stderr}`;
@@ -90,4 +142,9 @@ async function resolveRealPath(path: string): Promise<string> {
   } catch {
     return path;
   }
+}
+
+function resolveInstalledPackageDir(packageRoot: string, packageName: string): string {
+  const parts = packageName.split("/").filter((part) => part.length > 0);
+  return join(packageRoot, "node_modules", ...parts);
 }

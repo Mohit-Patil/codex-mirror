@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CloneManager, deriveClonePaths } from "../src/core/clone-manager.js";
+import { MINIMAX_RECOMMENDED_CODEX_VERSION } from "../src/core/clone-template.js";
 import { RegistryStore } from "../src/core/registry.js";
 import { WrapperManager } from "../src/core/wrapper-manager.js";
 import { exists } from "../src/utils/fs.js";
@@ -59,6 +60,7 @@ describe("CloneManager transactional behavior", () => {
     const rootPath = join(root, "clones", "alpha");
 
     await expect(manager.createClone({ name: "alpha", rootPath })).rejects.toThrow("Failed to create clone");
+    expect(installRuntimeMock).toHaveBeenCalledWith(expect.any(String), { pinnedVersion: undefined });
     expect(await registry.findByName("alpha")).toBeUndefined();
     expect(await exists(deriveClonePaths(rootPath).cloneBaseDir)).toBe(false);
   });
@@ -99,6 +101,59 @@ describe("CloneManager transactional behavior", () => {
 
     const metadataRaw = await readFile(deriveClonePaths(clone.rootPath).metadataPath, "utf8");
     expect(metadataRaw).toContain("\"codexVersionPinned\": \"1.0.0\"");
+  });
+
+  it("updates minimax API key in clone-local secrets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-clone-manager-"));
+    tempDirs.push(root);
+
+    const registry = new RegistryStore(join(root, "registry.json"));
+    const wrappers = new FakeWrapperManager(join(root, "bin"));
+    const manager = new CloneManager(registry, wrappers as unknown as WrapperManager);
+
+    runtimeVersionQueue.push("1.0.0");
+    const clone = await manager.createClone({
+      name: "mini",
+      rootPath: join(root, "clones", "mini"),
+      template: "minimax",
+      minimaxApiKey: "old-key",
+    });
+    expect(installRuntimeMock).toHaveBeenCalledWith(expect.any(String), {
+      pinnedVersion: MINIMAX_RECOMMENDED_CODEX_VERSION,
+    });
+
+    await manager.setMiniMaxApiKey("mini", "new-key");
+
+    const secretsRaw = await readFile(deriveClonePaths(clone.rootPath).secretsPath, "utf8");
+    expect(secretsRaw).toContain("\"MINIMAX_API_KEY\": \"new-key\"");
+  });
+
+  it("migrates minimax legacy model ids during update", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-clone-manager-"));
+    tempDirs.push(root);
+
+    const registry = new RegistryStore(join(root, "registry.json"));
+    const wrappers = new FakeWrapperManager(join(root, "bin"));
+    const manager = new CloneManager(registry, wrappers as unknown as WrapperManager);
+
+    runtimeVersionQueue.push("1.0.0");
+    const clone = await manager.createClone({
+      name: "mini",
+      rootPath: join(root, "clones", "mini"),
+      template: "minimax",
+      minimaxApiKey: "old-key",
+    });
+
+    const configPath = join(clone.rootPath, ".codex-mirror", "home", ".codex", "config.toml");
+    const legacyConfig = await readFile(configPath, "utf8");
+    await writeFile(configPath, legacyConfig.replace(/MiniMax-M2.5/g, "codex-MiniMax-M2.1"), "utf8");
+
+    runtimeVersionQueue.push("2.0.0");
+    await manager.updateClone("mini");
+
+    const configAfter = await readFile(configPath, "utf8");
+    expect(configAfter).toContain('model = "MiniMax-M2.5"');
+    expect(configAfter).not.toContain('model = "codex-MiniMax-M2.1"');
   });
 });
 

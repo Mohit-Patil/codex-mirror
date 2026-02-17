@@ -2,6 +2,13 @@
 
 ## Common operator tasks
 
+## Create clones
+
+```bash
+node dist/cli.js create --name work
+node dist/cli.js create --name mini --provider minimax
+```
+
 ## Health checks
 
 ```bash
@@ -76,3 +83,7 @@ node dist/cli.js remove <clone>
   - Global state root (registry + clone roots default base).
 - `CODEX_MIRROR_BIN_DIR`
   - Where clone wrapper commands are installed.
+- `CODEX_MIRROR_MINIMAX_CODEX_VERSION`
+  - Override pinned Codex version used for MiniMax template clones.
+- `CODEX_MIRROR_DISABLE_MINIMAX_RUNTIME_PIN=1`
+  - Disable version pinning for MiniMax templates (advanced/debug only).
