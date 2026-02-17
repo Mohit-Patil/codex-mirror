@@ -28,17 +28,25 @@ This project currently targets **official Codex only** (Phase 1). Multi-provider
 
 ## Quick start
 
+Direct run (no install):
+
 ```bash
-npm install
-npm run build
-node dist/cli.js
+npx codex-mirror@latest
 ```
 
-Global install (after publish):
+Global install:
 
 ```bash
 npm install -g codex-mirror
 codex-mirror
+```
+
+Local development:
+
+```bash
+npm install
+npm run build
+node dist/cli.js
 ```
 
 From the TUI:
@@ -48,6 +56,8 @@ From the TUI:
 4. Use `Diagnostics` for health checks.
 
 ## CLI usage
+
+Use `codex-mirror` (or `npx codex-mirror@latest`) instead of `node dist/cli.js` when running the published package.
 
 ```bash
 # Create clone (default root: ~/.codex-mirror/clones/<name>)
