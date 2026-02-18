@@ -25,7 +25,7 @@ interface DashboardSummary {
   unknownAuth: number;
 }
 
-type MainAction = "quick" | "create" | "manage" | "update-all" | "doctor" | "path-setup" | "about" | "exit";
+type MainAction = "quick" | "manage" | "update-all" | "doctor" | "path-setup" | "about" | "exit";
 
 export async function runTui(deps: TuiDeps): Promise<void> {
   const healthCache = new Map<string, DoctorResult>();
@@ -39,7 +39,6 @@ export async function runTui(deps: TuiDeps): Promise<void> {
         statusLines: buildDashboardStatusLines(clones, healthCache, deps.defaultBinDir),
         items: [
           { label: "Quick Clone", value: "quick", description: "Name only, ready in seconds" },
-          { label: "New Clone Wizard", value: "create", description: "Guided clone creation" },
           { label: "Manage Clones", value: "manage", description: "Run, login, logout, update, remove" },
           { label: "Update All Clones", value: "update-all", description: "Re-pin all clones to current Codex" },
           { label: "Diagnostics", value: "doctor", description: "Health check one or all clones" },
@@ -53,10 +52,6 @@ export async function runTui(deps: TuiDeps): Promise<void> {
 
       if (action === "quick") {
         await quickClone(deps);
-        continue;
-      }
-      if (action === "create") {
-        await createCloneWizard(deps);
         continue;
       }
       if (action === "manage") {
@@ -76,8 +71,7 @@ export async function runTui(deps: TuiDeps): Promise<void> {
         continue;
       }
       if (action === "about") {
-        printAbout();
-        await waitContinue("About Codex Mirror", "Return to main menu", []);
+        await waitContinue("About Codex Mirror", "Project behavior and notes", buildAboutLines());
         continue;
       }
       if (action === "exit") {
@@ -116,7 +110,7 @@ async function quickClone(deps: TuiDeps): Promise<void> {
   });
 
   if (!shouldCreate) {
-    await waitContinue("Quick Clone", "Cancelled", []);
+    await waitContinue("Quick Clone", "Cancelled", ["No clone was created."]);
     return;
   }
 
@@ -150,83 +144,24 @@ async function quickClone(deps: TuiDeps): Promise<void> {
   ]);
 }
 
-async function createCloneWizard(deps: TuiDeps): Promise<void> {
-  const name = await promptText({
-    title: "New Clone Wizard",
-    subtitle: "Guided clone creation",
-    sectionTitle: "Step 1 of 3",
-    lines: ["Choose a clone name.", "Name must be filesystem-safe and unique."],
-    label: "Clone name",
-    footer: "Type name | Enter continue | Esc cancel",
-    validate: validateCloneNameForPrompt,
-  });
-
-  const normalized = name.trim();
-  const suggestedRoot = resolve(deps.defaultCloneBaseDir, sanitizeCloneName(normalized));
-
-  const shouldCreate = await promptConfirm({
-    title: "New Clone Wizard",
-    subtitle: "Guided clone creation",
-    sectionTitle: "Step 2 of 3",
-    lines: [`Name: ${normalized}`, `Storage: ${suggestedRoot}`, "Create this clone now?"],
-    footer: "Up/Down navigate | Enter select | Esc cancel",
-    defaultValue: true,
-  });
-
-  if (!shouldCreate) {
-    await waitContinue("New Clone Wizard", "Cancelled", []);
-    return;
-  }
-
-  renderPanel({
-    title: "New Clone Wizard",
-    subtitle: "Guided clone creation",
-    sectionTitle: "Step 3 of 3",
-    lines: ["Creating isolated runtime + state folders...", "This can take a few seconds."],
-    footer: "Please wait",
-  });
-
-  const clone = await deps.cloneManager.createClone({ name: normalized, rootPath: suggestedRoot });
-
-  const doLogin = await promptConfirm({
-    title: "New Clone Wizard",
-    subtitle: "Optional login",
-    lines: ["Run 'codex login' for this clone now?"],
-    defaultValue: false,
-    confirmLabel: "Login now",
-    cancelLabel: "Skip",
-  });
-
-  if (doLogin) {
-    await deps.launcher.run(clone, ["login"]);
-  }
-
-  await waitContinue("Clone Created", "Wizard complete", [
-    `Name: ${clone.name}`,
-    `Path: ${clone.rootPath}`,
-    `Wrapper: ${clone.wrapperPath}`,
-    ...buildPathNoticeLines(deps.defaultBinDir),
-  ]);
-}
-
 async function manageClones(deps: TuiDeps, healthCache: Map<string, DoctorResult>): Promise<void> {
   while (true) {
     const clones = await deps.cloneManager.listClones();
     if (clones.length === 0) {
-      const action = await promptMenu<"create" | "back">({
+      const action = await promptMenu<"quick" | "back">({
         title: "Manage Clones",
         subtitle: "No clones found",
         statusLines: ["No clones yet. Create one first."],
         items: [
-          { label: "Create Clone", value: "create", description: "Open New Clone Wizard" },
+          { label: "Create Clone", value: "quick", description: "Open Quick Clone flow" },
           { label: "Back", value: "back" },
         ],
         initialIndex: 0,
         cancelValue: "back",
       });
 
-      if (action === "create") {
-        await createCloneWizard(deps);
+      if (action === "quick") {
+        await quickClone(deps);
         continue;
       }
       return;
@@ -239,10 +174,10 @@ async function manageClones(deps: TuiDeps, healthCache: Map<string, DoctorResult
       items: [
         ...clones.map((clone) => {
           const cached = healthCache.get(clone.name);
-          const health = cached ? (cached.ok ? "OK" : "ISSUE") : "UNKNOWN";
-          const auth = cached?.authStatus ?? "unknown";
           return {
-            label: `${clone.name} [${health}] [${auth}]`,
+            label: cached
+              ? `${clone.name} [${cached.ok ? "OK" : "ISSUE"}] [${cached.authStatus}]`
+              : clone.name,
             value: clone.name,
             description: `${clone.codexVersionPinned} · ${shortenPathForDisplay(clone.rootPath, 34)}`,
           };
@@ -348,7 +283,7 @@ async function manageCloneActions(
       }
       await deps.cloneManager.removeClone(clone.name);
       healthCache.delete(clone.name);
-      await waitContinue("Clone Removed", clone.name, []);
+      await waitContinue("Clone Removed", clone.name, ["Clone runtime and local state were removed."]);
       return;
     }
 
@@ -507,8 +442,7 @@ function buildDashboardStatusLines(
   lines.push(`Clones: ${clones.length}`);
 
   if (cachedResults.length === 0) {
-    lines.push("Health: unknown (run Diagnostics to populate)");
-    lines.push("Auth: unknown");
+    lines.push("Run Diagnostics to populate clone health and auth status.");
   } else {
     lines.push(`Health: ${summary.healthy} healthy / ${summary.issues} issues`);
     lines.push(
@@ -529,9 +463,11 @@ function buildDashboardStatusLines(
   lines.push("Recent clones:");
   for (const clone of clones.slice(0, 5)) {
     const result = healthCache.get(clone.name);
-    const health = result ? (result.ok ? "OK" : "ISSUE") : "UNKNOWN";
-    const auth = result?.authStatus ?? "unknown";
-    lines.push(`- ${clone.name} [${health}] [${auth}] ${shortenPathForDisplay(clone.rootPath, 34)}`);
+    if (result) {
+      lines.push(`- ${clone.name} [${result.ok ? "OK" : "ISSUE"}] [${result.authStatus}] ${shortenPathForDisplay(clone.rootPath, 34)}`);
+      continue;
+    }
+    lines.push(`- ${clone.name} ${shortenPathForDisplay(clone.rootPath, 34)}`);
   }
 
   return lines;
@@ -566,27 +502,11 @@ function summarize(results: DoctorResult[]): DashboardSummary {
   return summary;
 }
 
-function printAbout(): void {
-  renderPanel({
-    title: "About Codex Mirror",
-    subtitle: "Project behavior and notes",
-    lines: [
-      "Creates centrally-managed isolated Codex clones.",
-      "Each clone has its own auth/session/config state.",
-      "Runtime is pinned per clone and updated on demand.",
-      "Diagnostics checks runtime, wrapper, writable paths, and auth status.",
-      "Shell PATH Setup writes a managed PATH block in your shell RC file.",
-      "Use Quick Clone for fastest flow, Wizard for guided setup.",
-    ],
-    footer: "Open source utility for multi-account local workflows",
-  });
-}
-
 async function waitContinue(title: string, subtitle: string, lines: string[]): Promise<void> {
   await promptMenu<"continue">({
     title,
     subtitle,
-    statusLines: lines.length > 0 ? lines : [" "],
+    statusLines: lines.length > 0 ? lines : ["No additional details."],
     summaryTitle: "[ Details ]",
     items: [{ label: "Continue", value: "continue" }],
     actionsTitle: "[ Continue ]",
@@ -678,5 +598,17 @@ function buildPathNoticeLines(binDir: string): string[] {
     `PATH notice: ${binDir} is not on PATH`,
     "Run: codex-mirror path setup",
     `Then: ${sourceCommandFor(shell, rcFile)}`,
+  ];
+}
+
+function buildAboutLines(): string[] {
+  return [
+    "Creates centrally-managed isolated Codex clones.",
+    "Each clone has its own auth/session/config state.",
+    "Runtime is pinned per clone and updated on demand.",
+    "Diagnostics checks runtime, wrapper, writable paths, and auth status.",
+    "Shell PATH Setup writes a managed PATH block in your shell RC file.",
+    "Use Quick Clone for fastest setup.",
+    "Open source utility for multi-account local workflows.",
   ];
 }
