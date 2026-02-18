@@ -272,6 +272,8 @@ async function runRawSession<T>(setup: (session: RawSessionController<T>) => voi
     if (input.isTTY) {
       input.setRawMode(previousRawMode);
     }
+    // Return stdin to paused mode so Node can exit after the final prompt.
+    input.pause();
     output.write("\x1b[?25h");
   };
 
@@ -346,9 +348,6 @@ function buildMenuLines<T>(options: MenuOptions<T>, selected: number): string[] 
   lines.push(styleBrand(options.title));
   if (options.subtitle) {
     lines.push(styleMuted(`  ${options.subtitle}`));
-  }
-  if (options.title === "CODEX MIRROR") {
-    lines.push(styleMuted("  Official Codex clone manager"));
   }
 
   lines.push("─");
