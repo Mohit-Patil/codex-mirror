@@ -126,6 +126,21 @@ export function findCommand(command: string): string | null {
   return found ?? null;
 }
 
+export async function openUrl(url: string): Promise<void> {
+  const opener = resolveUrlOpener();
+  return new Promise((resolve, reject) => {
+    const child = spawn(opener.command, [...opener.args, url], {
+      stdio: "ignore",
+      detached: true,
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
 function appendWithLimit(existing: string, chunk: Buffer | string, limit: number): string {
   const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
   const combined = existing + text;
@@ -133,4 +148,19 @@ function appendWithLimit(existing: string, chunk: Buffer | string, limit: number
     return combined;
   }
   return combined.slice(combined.length - limit);
+}
+
+interface UrlOpener {
+  command: string;
+  args: string[];
+}
+
+function resolveUrlOpener(): UrlOpener {
+  if (process.platform === "darwin") {
+    return { command: "open", args: [] };
+  }
+  if (process.platform === "win32") {
+    return { command: "cmd", args: ["/c", "start", ""] };
+  }
+  return { command: "xdg-open", args: [] };
 }

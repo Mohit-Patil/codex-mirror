@@ -17,6 +17,10 @@ const pathSetupMocks = vi.hoisted(() => ({
   sourceCommandFor: vi.fn(),
 }));
 
+const processMocks = vi.hoisted(() => ({
+  openUrl: vi.fn(),
+}));
+
 vi.mock("../src/tui/menu.js", () => ({
   promptMenu: menuMocks.promptMenu,
   promptConfirm: menuMocks.promptConfirm,
@@ -33,9 +37,13 @@ vi.mock("../src/core/path-setup.js", () => ({
   sourceCommandFor: pathSetupMocks.sourceCommandFor,
 }));
 
+vi.mock("../src/utils/process.js", () => ({
+  openUrl: processMocks.openUrl,
+}));
+
 import { runTui } from "../src/tui/index.js";
 
-type MainAction = "quick" | "manage" | "update-all" | "doctor" | "path-setup" | "about" | "exit";
+type MainAction = "quick" | "manage" | "update-all" | "doctor" | "path-setup" | "star" | "about" | "exit";
 
 interface MenuCall<T = unknown> {
   title: string;
@@ -68,6 +76,7 @@ describe("runTui main menu actions", () => {
       rcFile: "/tmp/.zshrc",
       sourceCommand: "source /tmp/.zshrc",
     });
+    processMocks.openUrl.mockResolvedValue(undefined);
   });
 
   it("defines all main menu items with descriptions (except Exit)", async () => {
@@ -89,14 +98,25 @@ describe("runTui main menu actions", () => {
       "Update All Clones",
       "Diagnostics",
       "Shell PATH Setup",
+      "Star on GitHub",
       "About",
       "Exit",
     ]);
 
-    const described = firstCall?.items.slice(0, 6) ?? [];
+    const described = firstCall?.items.slice(0, 7) ?? [];
     expect(described.every((item) => typeof item.description === "string" && item.description.trim().length > 0)).toBe(
       true,
     );
+  });
+
+  it("opens repository from Star on GitHub (option 6)", async () => {
+    const deps = createDeps([]);
+    await runWithMainActions(["star", "exit"], deps);
+
+    expect(processMocks.openUrl).toHaveBeenCalledOnce();
+    const starCall = getMenuCalls().find((call) => call.title === "Star on GitHub");
+    expect(starCall?.subtitle).toBe("Repository opened");
+    expect(allLinesNonEmpty(starCall?.statusLines)).toBe(true);
   });
 
   it("shows About content (option 7) with non-empty details", async () => {
@@ -156,7 +176,25 @@ describe("runTui main menu actions", () => {
     expect(allLinesNonEmpty(pathSetup?.statusLines)).toBe(true);
   });
 
-  it("exits cleanly from Exit (option 7)", async () => {
+  it("supports star-and-exit path from Exit (option 8)", async () => {
+    const deps = createDeps([]);
+    const queue: MainAction[] = ["exit"];
+    menuMocks.promptMenu.mockImplementation(async (options: MenuCall) => {
+      if (options.title === "CODEX MIRROR") {
+        return queue.shift() ?? "exit";
+      }
+      if (options.title === "Exit Codex Mirror") {
+        return "star-exit";
+      }
+      return fallbackSelection(options);
+    });
+
+    await runTui(deps);
+
+    expect(processMocks.openUrl).toHaveBeenCalledOnce();
+  });
+
+  it("exits cleanly from Exit (option 8)", async () => {
     const deps = createDeps([]);
     await runWithMainActions(["exit"], deps);
 
@@ -206,6 +244,10 @@ async function runWithMainActions(actions: MainAction[], deps: ReturnType<typeof
 }
 
 function fallbackSelection(options: MenuCall): unknown {
+  if (options.title === "Exit Codex Mirror") {
+    return "exit";
+  }
+
   const continueItem = options.items.find((item) => item.value === "continue");
   if (continueItem) {
     return continueItem.value;
