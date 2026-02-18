@@ -6,6 +6,7 @@ import { Doctor } from "../core/doctor.js";
 import { Launcher } from "../core/launcher.js";
 import { detectShell, ensurePathInShellRc, getPathStatus, isDirOnPath, resolveRcFile, sourceCommandFor } from "../core/path-setup.js";
 import { CloneRecord, DoctorResult } from "../types.js";
+import { openUrl } from "../utils/process.js";
 import { promptConfirm, promptMenu, promptText, renderPanel } from "./menu.js";
 
 interface TuiDeps {
@@ -25,7 +26,10 @@ interface DashboardSummary {
   unknownAuth: number;
 }
 
-type MainAction = "quick" | "manage" | "update-all" | "doctor" | "path-setup" | "about" | "exit";
+type MainAction = "quick" | "manage" | "update-all" | "doctor" | "path-setup" | "star" | "about" | "exit";
+type ExitAction = "star-exit" | "exit" | "back";
+
+const REPOSITORY_URL = "https://github.com/Mohit-Patil/codex-mirror";
 
 export async function runTui(deps: TuiDeps): Promise<void> {
   const healthCache = new Map<string, DoctorResult>();
@@ -43,6 +47,7 @@ export async function runTui(deps: TuiDeps): Promise<void> {
           { label: "Update All Clones", value: "update-all", description: "Re-pin all clones to current Codex" },
           { label: "Diagnostics", value: "doctor", description: "Health check one or all clones" },
           { label: "Shell PATH Setup", value: "path-setup", description: "Make clone wrappers discoverable globally" },
+          { label: "Star on GitHub", value: "star", description: "Open repository page in browser" },
           { label: "About", value: "about", description: "Project behavior and notes" },
           { label: "Exit", value: "exit" },
         ],
@@ -70,12 +75,20 @@ export async function runTui(deps: TuiDeps): Promise<void> {
         await configureShellPath(deps);
         continue;
       }
+      if (action === "star") {
+        await showGitHubStarPrompt();
+        continue;
+      }
       if (action === "about") {
         await waitContinue("About Codex Mirror", "Project behavior and notes", buildAboutLines());
         continue;
       }
       if (action === "exit") {
-        return;
+        const shouldExit = await confirmExit();
+        if (shouldExit) {
+          return;
+        }
+        continue;
       }
     } catch (error) {
       if (isUserAbort(error)) {
@@ -611,4 +624,60 @@ function buildAboutLines(): string[] {
     "Use Quick Clone for fastest setup.",
     "Open source utility for multi-account local workflows.",
   ];
+}
+
+async function showGitHubStarPrompt(): Promise<void> {
+  const opened = await openRepositoryInBrowser();
+  if (opened) {
+    await waitContinue("Star on GitHub", "Repository opened", [
+      "If the browser did not open, use this URL:",
+      REPOSITORY_URL,
+    ]);
+    return;
+  }
+
+  await waitContinue("Star on GitHub", "Could not open browser", [
+    "Open this URL manually to star the project:",
+    REPOSITORY_URL,
+  ]);
+}
+
+async function confirmExit(): Promise<boolean> {
+  const action = await promptMenu<ExitAction>({
+    title: "Exit Codex Mirror",
+    subtitle: "Support the project",
+    statusLines: ["Before you go, would you like to star the repository?"],
+    items: [
+      { label: "Star and Exit", value: "star-exit", description: "Opens repository page, then exits" },
+      { label: "Skip and Exit", value: "exit", description: "Exit now" },
+      { label: "Back", value: "back", description: "Return to main menu" },
+    ],
+    footer: "Up/Down navigate | Enter select | Esc back",
+    cancelValue: "back",
+  });
+
+  if (action === "back") {
+    return false;
+  }
+
+  if (action === "star-exit") {
+    const opened = await openRepositoryInBrowser();
+    if (!opened) {
+      await waitContinue("Exit Codex Mirror", "Could not open browser", [
+        "Open this URL manually to star the project:",
+        REPOSITORY_URL,
+      ]);
+    }
+  }
+
+  return true;
+}
+
+async function openRepositoryInBrowser(): Promise<boolean> {
+  try {
+    await openUrl(REPOSITORY_URL);
+    return true;
+  } catch {
+    return false;
+  }
 }
