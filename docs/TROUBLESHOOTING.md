@@ -1,5 +1,8 @@
 # Troubleshooting
 
+Examples below use the installed command.
+For local development from source, replace `codex-mirror` with `node dist/cli.js`.
+
 ## TUI key issues in Warp
 
 Symptoms:
@@ -9,23 +12,27 @@ Symptoms:
 
 Checks:
 
-1. Run latest build:
+1. Run latest build (local source checkout):
    ```bash
    npm run build
    node dist/cli.js
    ```
-2. Use a clean shell session (no background raw-mode process).
-3. If needed, fall back to CLI commands (`create`, `list`, `run`, `doctor`) while debugging terminal behavior.
+2. Or run latest published package:
+   ```bash
+   npx codex-mirror@latest
+   ```
+3. Use a clean shell session (no background raw-mode process).
+4. If needed, fall back to CLI commands (`create`, `list`, `run`, `doctor`) while debugging terminal behavior.
 
 ## "No clones found"
 
 - Create one with `Quick Clone` or:
   ```bash
-  node dist/cli.js create --name <clone>
+  codex-mirror create --name <clone>
   ```
 - Verify registry:
   ```bash
-  node dist/cli.js list --full
+  codex-mirror list --full
   ```
 
 ## Login starts unexpectedly
@@ -34,14 +41,14 @@ Checks:
 - Login is optional and prompted after clone creation.
 - Manual login:
   ```bash
-  node dist/cli.js login <clone>
+  codex-mirror login <clone>
   ```
 
 ## Wrapper points to wrong place
 
 - Reinstall wrappers:
   ```bash
-  node dist/cli.js wrapper install
+  codex-mirror wrapper install
   ```
 - Verify configured wrapper dir:
   - `CODEX_MIRROR_BIN_DIR` env var
@@ -51,11 +58,11 @@ Checks:
 
 - Check whether wrapper bin dir is on PATH:
   ```bash
-  node dist/cli.js path status
+  codex-mirror path status
   ```
 - Auto-configure your shell startup file:
   ```bash
-  node dist/cli.js path setup
+  codex-mirror path setup
   ```
 - Reload shell:
   ```bash
@@ -66,11 +73,11 @@ Checks:
 
 - Run direct login status:
   ```bash
-  node dist/cli.js run <clone> -- login status
+  codex-mirror run <clone> -- login status
   ```
 - Then rerun:
   ```bash
-  node dist/cli.js doctor <clone>
+  codex-mirror doctor <clone>
   ```
 
 ## Registry lock timeout

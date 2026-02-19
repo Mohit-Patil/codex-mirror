@@ -49,50 +49,65 @@ npm run build
 node dist/cli.js
 ```
 
-From the TUI:
-1. Choose `Quick Clone` or `New Clone Wizard`.
+## Demo
+
+![codex-mirror demo](docs/assets/demo.gif)
+
+```bash
+npx codex-mirror@latest
+```
+
+`GIF source path:` `docs/assets/demo.gif`
+`Direct link (for npm):` `https://raw.githubusercontent.com/Mohit-Patil/codex-mirror/main/docs/assets/demo.gif`
+
+From the TUI main menu:
+1. Choose `Quick Clone`.
 2. Optionally run login for that clone.
 3. Use `Manage Clones` to run, update, remove.
 4. Use `Diagnostics` for health checks.
+5. Use `Shell PATH Setup` to auto-configure wrapper discovery.
+6. Use `Star on GitHub` to open the repository page.
+7. Choose `Exit` for a final `Star and Exit` / `Skip and Exit` prompt.
 
 ## CLI usage
 
-Use `codex-mirror` (or `npx codex-mirror@latest`) instead of `node dist/cli.js` when running the published package.
+Examples below use the installed command.
+For local development from source, replace `codex-mirror` with `node dist/cli.js`.
 
 ```bash
 # Create clone (default root: ~/.codex-mirror/clones/<name>)
-node dist/cli.js create --name work
+codex-mirror create --name work
 
 # List clones
-node dist/cli.js list
-node dist/cli.js list --full
-node dist/cli.js list --json
+codex-mirror list
+codex-mirror list --full
+codex-mirror list --json
 
 # Run clone
-node dist/cli.js run work
-node dist/cli.js run work -- --model o3
+codex-mirror run work
+codex-mirror run work -- --model o3
 
 # Login/logout
-node dist/cli.js login work
-node dist/cli.js logout work
+codex-mirror login work
+codex-mirror logout work
 
 # Health checks
-node dist/cli.js doctor
-node dist/cli.js doctor work --json
+codex-mirror doctor
+codex-mirror doctor work --json
 
 # Updates
-node dist/cli.js update work
-node dist/cli.js update --all
+codex-mirror update work
+codex-mirror update --all
 
 # Remove clone
-node dist/cli.js remove work
+codex-mirror remove work
 
 # Reinstall wrappers
-node dist/cli.js wrapper install
+codex-mirror wrapper install
 
 # Check/setup PATH for wrapper commands
-node dist/cli.js path status
-node dist/cli.js path setup
+codex-mirror path status
+codex-mirror path setup
 ```
 
 ## Data layout
@@ -177,4 +192,5 @@ npm run check
    ```bash
    git push origin main --follow-tags
    ```
-4. Tag trigger `v*` will run `.github/workflows/release.yml` and publish to npm.
+4. Tag trigger `v*` runs `.github/workflows/release.yml` and publishes to npm.
+5. Release workflow enforces `tag version == package.json version` (for example: `v0.1.5` requires `"version": "0.1.5"`).
