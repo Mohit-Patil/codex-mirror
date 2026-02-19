@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -77,5 +77,47 @@ describe("path setup", () => {
     expect(status.hasManagedBlock).toBe(true);
     expect(status.onPath).toBe(false);
     expect(status.rcFile).toBe(rcFile);
+  });
+
+  it("rejects --rc-file overrides outside HOME", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-mirror-path-home-"));
+    const outside = await mkdtemp(join(tmpdir(), "codex-mirror-path-outside-"));
+    tempDirs.push(home, outside);
+
+    const binDir = join(home, ".local", "bin");
+    const rcFile = join(outside, ".bashrc");
+
+    expect(() => resolveRcFile("bash", home, rcFile)).toThrow("outside HOME");
+    await expect(ensurePathInShellRc({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("outside HOME");
+    await expect(getPathStatus({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("outside HOME");
+  });
+
+  it("rejects --rc-file symlink targets", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-mirror-path-home-"));
+    tempDirs.push(home);
+
+    const binDir = join(home, ".local", "bin");
+    const target = join(home, "real-rc");
+    const rcFile = join(home, ".bashrc");
+    await writeFile(target, "# real\n", "utf8");
+    await symlink(target, rcFile);
+
+    await expect(ensurePathInShellRc({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("symlink");
+    await expect(getPathStatus({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("symlink");
+  });
+
+  it("rejects --rc-file paths that traverse symlink directories", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-mirror-path-home-"));
+    tempDirs.push(home);
+
+    const binDir = join(home, ".local", "bin");
+    const realDir = join(home, "real");
+    const linkedDir = join(home, "linked");
+    await mkdir(realDir, { recursive: true });
+    await symlink(realDir, linkedDir);
+
+    const rcFile = join(linkedDir, ".bashrc");
+    await expect(ensurePathInShellRc({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("traverses a symlink");
+    await expect(getPathStatus({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("traverses a symlink");
   });
 });

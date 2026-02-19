@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-  id-token: write
+  id-token: write # required for npm provenance attestation (`npm publish --provenance`)
 
 jobs:
   publish-npm:
@@ -16,10 +16,48 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Verify release tag provenance
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          TRUSTED_ACTORS: ${{ vars.RELEASE_TRUSTED_ACTORS }}
+        run: |
+          set -euo pipefail
+
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --force --prune --tags --unshallow origin
+          else
+            git fetch --force --prune --tags origin
+          fi
+          git fetch --force origin main:refs/remotes/origin/main
+
+          tag_ref="refs/tags/${TAG_NAME}"
+          tag_type="$(git cat-file -t "${tag_ref}")"
+          if [ "${tag_type}" != "tag" ]; then
+            echo "Release tag must be annotated (lightweight tags are not allowed): ${TAG_NAME}"
+            exit 1
+          fi
+
+          tag_commit="$(git rev-list -n 1 "${tag_ref}")"
+          if ! git merge-base --is-ancestor "${tag_commit}" "refs/remotes/origin/main"; then
+            echo "Release tag commit ${tag_commit} is not reachable from origin/main"
+            exit 1
+          fi
+
+          if [ -n "${TRUSTED_ACTORS}" ]; then
+            trusted_actors_csv=",${TRUSTED_ACTORS// /},"
+            case "${trusted_actors_csv}" in
+              *,"${GITHUB_ACTOR}",*) ;;
+              *)
+                echo "Actor ${GITHUB_ACTOR} is not in RELEASE_TRUSTED_ACTORS"
+                exit 1
+                ;;
+            esac
+          fi
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6
         with:
           node-version: "22"
           cache: npm
@@ -46,7 +84,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}

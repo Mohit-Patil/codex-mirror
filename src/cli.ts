@@ -13,6 +13,7 @@ import { RegistryStore } from "./core/registry.js";
 import { WrapperManager, WrapperRunner } from "./core/wrapper-manager.js";
 import { runTui } from "./tui/index.js";
 import { DoctorResult } from "./types.js";
+import { sanitizeTerminalOutput, sanitizeTerminalValue } from "./utils/terminal.js";
 
 async function main(): Promise<void> {
   const cliVersion = await resolveCliVersion();
@@ -46,8 +47,8 @@ async function main(): Promise<void> {
         name: cloneName,
         rootPath,
       });
-      console.log(`Created clone '${clone.name}' at ${clone.rootPath}`);
-      console.log(`Wrapper: ${clone.wrapperPath}`);
+      console.log(`Created clone '${safeText(clone.name)}' at ${safeText(clone.rootPath)}`);
+      console.log(`Wrapper: ${safeText(clone.wrapperPath)}`);
       printPathHintIfNeeded(context.defaultBinDir);
     });
 
@@ -70,20 +71,20 @@ async function main(): Promise<void> {
 
       if (options.full) {
         for (const clone of clones) {
-          console.log(`${clone.name}`);
-          console.log(`  root: ${clone.rootPath}`);
-          console.log(`  version: ${clone.codexVersionPinned}`);
-          console.log(`  runtime: ${clone.runtimeEntryPath}`);
-          console.log(`  wrapper: ${clone.wrapperPath}`);
-          console.log(`  created: ${clone.createdAt}`);
-          console.log(`  updated: ${clone.updatedAt}`);
+          console.log(`${safeText(clone.name)}`);
+          console.log(`  root: ${safeText(clone.rootPath)}`);
+          console.log(`  version: ${safeText(clone.codexVersionPinned)}`);
+          console.log(`  runtime: ${safeText(clone.runtimeEntryPath)}`);
+          console.log(`  wrapper: ${safeText(clone.wrapperPath)}`);
+          console.log(`  created: ${safeText(clone.createdAt)}`);
+          console.log(`  updated: ${safeText(clone.updatedAt)}`);
           console.log("");
         }
         return;
       }
 
       for (const clone of clones) {
-        console.log(`${clone.name}\t${clone.codexVersionPinned}\t${clone.rootPath}`);
+        console.log(`${safeText(clone.name)}\t${safeText(clone.codexVersionPinned)}\t${safeText(clone.rootPath)}`);
       }
     });
 
@@ -155,7 +156,7 @@ async function main(): Promise<void> {
       }
 
       const updated = await cloneManager.updateClone(name);
-      console.log(`Updated clone '${updated.name}' to Codex ${updated.codexVersionPinned}`);
+      console.log(`Updated clone '${safeText(updated.name)}' to Codex ${safeText(updated.codexVersionPinned)}`);
     });
 
   program
@@ -164,7 +165,7 @@ async function main(): Promise<void> {
     .argument("<name>", "Clone name")
     .action(async (name: string) => {
       const removed = await cloneManager.removeClone(name);
-      console.log(`Removed clone '${removed.name}' from ${removed.rootPath}`);
+      console.log(`Removed clone '${safeText(removed.name)}' from ${safeText(removed.rootPath)}`);
     });
 
   program
@@ -182,7 +183,7 @@ async function main(): Promise<void> {
         clone.updatedAt = new Date().toISOString();
         await cloneManager.saveClone(clone);
       }
-      console.log(`Installed ${clones.length} wrapper(s) in ${targetDir}`);
+      console.log(`Installed ${clones.length} wrapper(s) in ${safeText(targetDir)}`);
       printPathHintIfNeeded(targetDir);
     });
 
@@ -202,16 +203,16 @@ async function main(): Promise<void> {
         rcFile: options.rcFile,
       });
 
-      console.log(`Wrapper bin dir: ${status.normalizedBinDir}`);
-      console.log(`Shell: ${status.shell}`);
-      console.log(`RC file: ${status.rcFile}`);
+      console.log(`Wrapper bin dir: ${safeText(status.normalizedBinDir)}`);
+      console.log(`Shell: ${safeText(status.shell)}`);
+      console.log(`RC file: ${safeText(status.rcFile)}`);
       console.log(`Managed block: ${status.hasManagedBlock ? "yes" : "no"}`);
       console.log(`On PATH (current session): ${status.onPath ? "yes" : "no"}`);
       if (!status.onPath) {
         console.log("");
         console.log("Run setup to configure shell PATH:");
         console.log("  codex-mirror path setup");
-        console.log(`Then reload shell: ${sourceCommandFor(status.shell, status.rcFile)}`);
+        console.log(`Then reload shell: ${safeText(sourceCommandFor(status.shell, status.rcFile))}`);
       }
     });
 
@@ -235,11 +236,11 @@ async function main(): Promise<void> {
         rcFile: result.rcFile,
       });
 
-      console.log(`${result.changed ? "Updated" : "Already configured"}: ${result.rcFile}`);
+      console.log(`${result.changed ? "Updated" : "Already configured"}: ${safeText(result.rcFile)}`);
       if (status.onPath) {
         console.log("PATH is already active in this session.");
       } else {
-        console.log(`Reload shell now: ${result.sourceCommand}`);
+        console.log(`Reload shell now: ${safeText(result.sourceCommand)}`);
       }
     });
 
@@ -294,14 +295,14 @@ function printDoctor(results: DoctorResult[]): void {
   }
 
   for (const result of results) {
-    console.log(`${result.ok ? "OK" : "FAIL"} ${result.name}`);
-    console.log(`  runtime: ${result.runtimePath}`);
-    console.log(`  wrapper: ${result.wrapperPath}`);
-    console.log(`  auth: ${result.authStatus}`);
+    console.log(`${result.ok ? "OK" : "FAIL"} ${safeText(result.name)}`);
+    console.log(`  runtime: ${safeText(result.runtimePath)}`);
+    console.log(`  wrapper: ${safeText(result.wrapperPath)}`);
+    console.log(`  auth: ${safeText(result.authStatus)}`);
     console.log(`  writable: ${result.writable ? "yes" : "no"}`);
     if (result.errors.length > 0) {
       for (const error of result.errors) {
-        console.log(`  error: ${error}`);
+        console.log(`  error: ${safeText(error)}`);
       }
     }
     console.log("");
@@ -315,10 +316,10 @@ function printPathHintIfNeeded(binDir: string): void {
   const shell = detectShell(process.env.SHELL);
   const rcFile = resolveRcFile(shell, process.env.HOME ?? homedir());
   console.log("");
-  console.log(`PATH notice: wrappers are installed in ${binDir}`);
+  console.log(`PATH notice: wrappers are installed in ${safeText(binDir)}`);
   console.log("That directory is not on PATH in this session.");
   console.log("Run: codex-mirror path setup");
-  console.log(`Then reload shell: ${sourceCommandFor(shell, rcFile)}`);
+  console.log(`Then reload shell: ${safeText(sourceCommandFor(shell, rcFile))}`);
 }
 
 function parseShellKind(value: string | undefined): ShellKind | undefined {
@@ -329,13 +330,13 @@ function parseShellKind(value: string | undefined): ShellKind | undefined {
   if (normalized === "bash" || normalized === "zsh" || normalized === "fish" || normalized === "sh") {
     return normalized;
   }
-  throw new Error(`Unsupported shell '${value}'. Use one of: bash, zsh, fish, sh`);
+  throw new Error(`Unsupported shell '${safeText(value)}'. Use one of: bash, zsh, fish, sh`);
 }
 
 async function resolveCliVersion(): Promise<string> {
   const envVersion = process.env.npm_package_version;
   if (envVersion && envVersion.trim().length > 0) {
-    return envVersion.trim();
+    return safeText(envVersion.trim());
   }
 
   try {
@@ -343,7 +344,7 @@ async function resolveCliVersion(): Promise<string> {
     const raw = await readFile(packageJsonPath, "utf8");
     const parsed = JSON.parse(raw) as { version?: string };
     if (parsed.version && parsed.version.trim().length > 0) {
-      return parsed.version.trim();
+      return safeText(parsed.version.trim());
     }
   } catch {
     // Fallback below if package metadata cannot be read.
@@ -352,8 +353,12 @@ async function resolveCliVersion(): Promise<string> {
   return "0.0.0";
 }
 
+function safeText(value: string): string {
+  return sanitizeTerminalOutput(value);
+}
+
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = sanitizeTerminalValue(error instanceof Error ? error.message : String(error));
   console.error(`Error: ${message}`);
   process.exitCode = 1;
 });

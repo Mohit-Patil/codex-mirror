@@ -52,7 +52,7 @@ describe("CLI smoke flow", () => {
       expect(listed).toHaveLength(1);
       expect(listed[0]?.name).toBe("smoke");
 
-      const rcFile = join(sandbox, ".bashrc");
+      const rcFile = join(env.HOME!, ".bashrc");
       const pathStatus = await runCli(
         ["path", "status", "--bin-dir", env.CODEX_MIRROR_BIN_DIR!, "--shell", "bash", "--rc-file", rcFile],
         env,

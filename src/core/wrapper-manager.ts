@@ -1,4 +1,5 @@
-import { chmod, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, lstat, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { CloneRecord } from "../types.js";
 import { ensureDir, removePath } from "../utils/fs.js";
@@ -29,9 +30,19 @@ export class WrapperManager {
   async installWrapper(clone: CloneRecord): Promise<string> {
     await ensureDir(this.binDir);
     const wrapperPath = this.getPathForClone(clone.name);
+    await this.assertSafeInstallTarget(wrapperPath);
     const content = buildWrapperContent(clone.name, this.runner);
-    await writeFile(wrapperPath, content, "utf8");
-    await chmod(wrapperPath, 0o755);
+    const tempPath = `${wrapperPath}.tmp-${process.pid}-${randomUUID()}`;
+
+    try {
+      await writeFile(tempPath, content, { encoding: "utf8", mode: 0o700 });
+      await chmod(tempPath, 0o755);
+      await rename(tempPath, wrapperPath);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+
     return wrapperPath;
   }
 
@@ -43,6 +54,23 @@ export class WrapperManager {
     const rel = relative(this.resolvedBinDir, path);
     if (rel === "" || rel === "." || rel.startsWith("..") || isAbsolute(rel)) {
       throw new Error(`Unsafe wrapper path computed for clone: ${path}`);
+    }
+  }
+
+  private async assertSafeInstallTarget(path: string): Promise<void> {
+    try {
+      const target = await lstat(path);
+      if (target.isSymbolicLink()) {
+        throw new Error(`Refusing to overwrite wrapper symlink at ${path}`);
+      }
+      if (!target.isFile()) {
+        throw new Error(`Refusing to overwrite non-regular wrapper target at ${path}`);
+      }
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return;
+      }
+      throw error;
     }
   }
 }
@@ -69,4 +97,8 @@ exec \"$RUNNER_CMD\" run ${nameLiteral} -- \"$@\"
 
 function shellSingleQuote(input: string): string {
   return `'${input.replace(/'/g, `'"'"'`)}'`;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT";
 }

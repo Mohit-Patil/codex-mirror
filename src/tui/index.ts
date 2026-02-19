@@ -7,6 +7,7 @@ import { Launcher } from "../core/launcher.js";
 import { detectShell, ensurePathInShellRc, getPathStatus, isDirOnPath, resolveRcFile, sourceCommandFor } from "../core/path-setup.js";
 import { CloneRecord, DoctorResult } from "../types.js";
 import { openUrl } from "../utils/process.js";
+import { sanitizeTerminalOutput } from "../utils/terminal.js";
 import { promptConfirm, promptMenu, promptText, renderPanel } from "./menu.js";
 
 interface TuiDeps {
@@ -577,13 +578,14 @@ function validateCloneNameForPrompt(value: string): true | string {
 }
 
 export function shortenPathForDisplay(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
+  const safeValue = sanitizeTerminalOutput(value);
+  if (safeValue.length <= maxLength) {
+    return safeValue;
   }
 
-  const suffix = basename(value);
+  const suffix = basename(safeValue);
   const headBudget = Math.max(0, maxLength - suffix.length - 4);
-  const head = value.slice(0, headBudget);
+  const head = safeValue.slice(0, headBudget);
   return `${head}.../${suffix}`.slice(0, maxLength);
 }
 
