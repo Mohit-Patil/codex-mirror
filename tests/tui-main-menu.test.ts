@@ -176,6 +176,46 @@ describe("runTui main menu actions", () => {
     expect(allLinesNonEmpty(pathSetup?.statusLines)).toBe(true);
   });
 
+  it("does not treat resolved default rc path as an override in Shell PATH Setup", async () => {
+    const deps = createDeps([]);
+    menuMocks.promptConfirm.mockResolvedValue(true);
+    pathSetupMocks.getPathStatus
+      .mockResolvedValueOnce({
+        onPath: false,
+        normalizedBinDir: "/tmp/bin",
+        shell: "zsh",
+        rcFile: "/tmp/.zshrc",
+        hasManagedBlock: false,
+      })
+      .mockResolvedValueOnce({
+        onPath: false,
+        normalizedBinDir: "/tmp/bin",
+        shell: "zsh",
+        rcFile: "/tmp/.zshrc",
+        hasManagedBlock: true,
+      });
+    pathSetupMocks.ensurePathInShellRc.mockResolvedValueOnce({
+      changed: true,
+      shell: "zsh",
+      rcFile: "/tmp/.zshrc",
+      sourceCommand: "source /tmp/.zshrc",
+    });
+
+    await runWithMainActions(["path-setup", "exit"], deps);
+
+    expect(pathSetupMocks.ensurePathInShellRc).toHaveBeenCalledWith({
+      binDir: "/tmp/bin",
+      shell: "zsh",
+    });
+    expect(pathSetupMocks.getPathStatus).toHaveBeenNthCalledWith(1, {
+      binDir: "/tmp/bin",
+    });
+    expect(pathSetupMocks.getPathStatus).toHaveBeenNthCalledWith(2, {
+      binDir: "/tmp/bin",
+      shell: "zsh",
+    });
+  });
+
   it("supports star-and-exit path from Exit (option 8)", async () => {
     const deps = createDeps([]);
     const queue: MainAction[] = ["exit"];

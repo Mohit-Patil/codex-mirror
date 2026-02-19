@@ -427,12 +427,10 @@ async function configureShellPath(deps: TuiDeps): Promise<void> {
   const result = await ensurePathInShellRc({
     binDir: deps.defaultBinDir,
     shell: status.shell,
-    rcFile: status.rcFile,
   });
   const after = await getPathStatus({
     binDir: deps.defaultBinDir,
     shell: result.shell,
-    rcFile: result.rcFile,
   });
 
   const lines = [

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { detectShell, ensurePathInShellRc, getPathStatus, isDirOnPath, resolveRcFile, sourceCommandFor } from "../src/core/path-setup.js";
 
@@ -104,6 +104,25 @@ describe("path setup", () => {
 
     await expect(ensurePathInShellRc({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("symlink");
     await expect(getPathStatus({ binDir, shell: "bash", rcFile, homeDir: home })).rejects.toThrow("symlink");
+  });
+
+  it("allows default rc symlink when no --rc-file override is provided", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-mirror-path-home-"));
+    tempDirs.push(home);
+
+    const binDir = join(home, ".local", "bin");
+    const target = join(home, ".dotfiles", "bashrc");
+    const defaultRc = join(home, ".bashrc");
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "# dotfiles\n", "utf8");
+    await symlink(target, defaultRc);
+
+    const result = await ensurePathInShellRc({ binDir, shell: "bash", homeDir: home });
+    expect(result.rcFile).toBe(defaultRc);
+
+    const status = await getPathStatus({ binDir, shell: "bash", homeDir: home });
+    expect(status.rcFile).toBe(defaultRc);
+    expect(status.hasManagedBlock).toBe(true);
   });
 
   it("rejects --rc-file paths that traverse symlink directories", async () => {

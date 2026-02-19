@@ -233,7 +233,7 @@ async function main(): Promise<void> {
       const status = await getPathStatus({
         binDir,
         shell: result.shell,
-        rcFile: result.rcFile,
+        rcFile: options.rcFile,
       });
 
       console.log(`${result.changed ? "Updated" : "Already configured"}: ${safeText(result.rcFile)}`);
