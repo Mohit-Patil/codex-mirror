@@ -46,8 +46,17 @@ Not in scope:
 - Auth checks have bounded timeout.
 - Prevents unbounded TUI stalls caused by hung subprocesses.
 
+## 6) Release tag provenance checks
+
+- Release workflow enforces annotated release tags (lightweight tags are rejected).
+- Tagged commit must be reachable from `origin/main`.
+- Optional trusted-actor allowlist can be enforced with repository variable `RELEASE_TRUSTED_ACTORS`.
+- Reduces risk of unauthorized or out-of-branch release publication.
+
 ## Operational recommendations
 
 - Keep `CODEX_MIRROR_BIN_DIR` private to your user account.
 - Do not share clone roots across different OS users.
 - Back up `~/.codex-mirror` before major upgrades.
+- Protect `main` and restrict who can push release tags.
+- Require signed release tags via repository rulesets/org policy for maintainer accounts.

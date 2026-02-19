@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { open, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { type FileHandle, lstat, open, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { CloneRecord, Registry } from "../types.js";
 import { ensureDir, exists, readJsonFile } from "../utils/fs.js";
@@ -8,6 +9,16 @@ const EMPTY_REGISTRY: Registry = {
   version: 1,
   clones: [],
 };
+
+interface LockIdentity {
+  dev: string;
+  ino: string;
+}
+
+interface LockLease {
+  handle: FileHandle;
+  identity: LockIdentity;
+}
 
 export class RegistryStore {
   private readonly lockPath: string;
@@ -91,26 +102,47 @@ export class RegistryStore {
   }
 
   private async withLock<T>(operation: () => Promise<T>): Promise<T> {
-    const handle = await this.acquireLock();
+    const lock = await this.acquireLock();
     try {
       return await operation();
     } finally {
-      await handle.close().catch(() => undefined);
-      await rm(this.lockPath, { force: true }).catch(() => undefined);
+      await lock.handle.close().catch(() => undefined);
+      await this.unlinkLockIfMatches(lock.identity).catch(() => undefined);
     }
   }
 
-  private async acquireLock() {
+  private async acquireLock(): Promise<LockLease> {
     await ensureDir(dirname(this.lockPath));
     const deadline = Date.now() + this.lockTimeoutMs;
 
     while (true) {
+      let handle: FileHandle | undefined;
       try {
-        const handle = await open(this.lockPath, "wx");
-        await handle.writeFile(`${process.pid}\n${Date.now()}\n`, { encoding: "utf8" });
-        return handle;
+        handle = await open(this.lockPath, lockOpenFlags(), 0o600);
       } catch (error) {
         if (!isAlreadyExistsError(error)) {
+          throw error;
+        }
+      }
+
+      if (handle) {
+        try {
+          const payload = `${process.pid}\n${Date.now()}\n`;
+          await handle.writeFile(payload, { encoding: "utf8" });
+          const details = await handle.stat();
+          if (!details.isFile()) {
+            throw new Error(`Registry lock is not a regular file at ${this.lockPath}`);
+          }
+          return {
+            handle,
+            identity: lockIdentityFromStat(details),
+          };
+        } catch (error) {
+          const details = await handle.stat().catch(() => undefined);
+          await handle.close().catch(() => undefined);
+          if (details?.isFile()) {
+            await this.unlinkLockIfMatches(lockIdentityFromStat(details)).catch(() => undefined);
+          }
           throw error;
         }
       }
@@ -129,14 +161,63 @@ export class RegistryStore {
 
   private async maybeBreakStaleLock(): Promise<void> {
     try {
-      const lockStat = await stat(this.lockPath);
-      if (Date.now() - lockStat.mtimeMs > this.staleLockMs) {
-        await rm(this.lockPath, { force: true });
+      const details = await lstat(this.lockPath);
+      if (!details.isFile()) {
+        return;
+      }
+      if (!isOwnedByCurrentUser(details.uid)) {
+        return;
+      }
+      if (Date.now() - details.mtimeMs > this.staleLockMs) {
+        await this.unlinkLockIfMatches(lockIdentityFromStat(details));
       }
     } catch {
       // Ignore stale lock checks if the file disappears concurrently.
     }
   }
+
+  private async unlinkLockIfMatches(identity: LockIdentity): Promise<void> {
+    try {
+      const current = await lstat(this.lockPath);
+      if (!current.isFile()) {
+        return;
+      }
+      const currentIdentity = lockIdentityFromStat(current);
+      if (currentIdentity.dev !== identity.dev || currentIdentity.ino !== identity.ino) {
+        return;
+      }
+      await unlink(this.lockPath);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+}
+
+function lockOpenFlags(): number {
+  let flags = fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_RDWR;
+  if (typeof fsConstants.O_NOFOLLOW === "number") {
+    flags |= fsConstants.O_NOFOLLOW;
+  }
+  return flags;
+}
+
+function lockIdentityFromStat(stat: { dev: number | bigint; ino: number | bigint }): LockIdentity {
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+  };
+}
+
+function isOwnedByCurrentUser(uid: number): boolean {
+  const currentUid = process.getuid?.();
+  return currentUid === undefined || currentUid === uid;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT";
 }
 
 function isAlreadyExistsError(error: unknown): boolean {

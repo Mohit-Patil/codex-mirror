@@ -1,4 +1,5 @@
 import { confirm, input, select } from "@inquirer/prompts";
+import { sanitizeTerminalOutput } from "../utils/terminal.js";
 
 export interface MenuItem<T> {
   label: string;
@@ -131,9 +132,9 @@ export async function promptMenu<T>(options: MenuOptions<T>): Promise<T> {
 export async function promptText(options: TextPromptOptions): Promise<string> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return input({
-      message: options.label,
-      default: options.initialValue,
-      validate: options.validate,
+      message: safeText(options.label),
+      default: options.initialValue ? safeText(options.initialValue) : undefined,
+      validate: options.validate ? sanitizeValidationResult(options.validate) : undefined,
     });
   }
 
@@ -193,7 +194,7 @@ export async function promptText(options: TextPromptOptions): Promise<string> {
 export async function promptConfirm(options: ConfirmPromptOptions): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return confirm({
-      message: options.lines?.[0] ?? "Confirm?",
+      message: safeText(options.lines?.[0] ?? "Confirm?"),
       default: options.defaultValue ?? true,
     });
   }
@@ -232,9 +233,11 @@ export function renderPanel(options: PanelOptions): void {
 async function promptMenuFallback<T>(options: MenuOptions<T>): Promise<T> {
   try {
     return await select({
-      message: options.subtitle ?? options.title,
+      message: safeText(options.subtitle ?? options.title),
       choices: options.items.map((item) => ({
-        name: item.description ? `${item.label} - ${item.description}` : item.label,
+        name: item.description
+          ? `${safeText(item.label)} - ${safeText(item.description)}`
+          : safeText(item.label),
         value: item.value,
       })),
     });
@@ -342,19 +345,19 @@ async function runRawSession<T>(setup: (session: RawSessionController<T>) => voi
 
 function buildMenuLines<T>(options: MenuOptions<T>, selected: number): string[] {
   const lines: string[] = [];
-  const summaryTitle = options.summaryTitle ?? "[ Summary ]";
-  const actionsTitle = options.actionsTitle ?? "[ Actions ]";
+  const summaryTitle = safeText(options.summaryTitle ?? "[ Summary ]");
+  const actionsTitle = safeText(options.actionsTitle ?? "[ Actions ]");
 
-  lines.push(styleBrand(options.title));
+  lines.push(styleBrand(safeText(options.title)));
   if (options.subtitle) {
-    lines.push(styleMuted(`  ${options.subtitle}`));
+    lines.push(styleMuted(`  ${safeText(options.subtitle)}`));
   }
 
   lines.push("─");
   lines.push(styleSection(summaryTitle));
   if (options.statusLines && options.statusLines.length > 0) {
     for (const line of options.statusLines) {
-      lines.push(`  ${line}`);
+      lines.push(`  ${safeText(line)}`);
     }
   } else {
     lines.push("  No summary available.");
@@ -369,68 +372,68 @@ function buildMenuLines<T>(options: MenuOptions<T>, selected: number): string[] 
     }
     const isSelected = i === selected;
     const index = String(i + 1).padStart(2, " ");
-    const label = `${index}. ${item.label}`;
+    const label = `${index}. ${safeText(item.label)}`;
     lines.push(isSelected ? `${stylePointer(">")} ${styleSelected(label)}` : `  ${label}`);
     if (item.description) {
-      lines.push(`      ${styleMuted(item.description)}`);
+      lines.push(`      ${styleMuted(safeText(item.description))}`);
     }
   }
 
   lines.push("─");
-  lines.push(styleMuted(options.footer ?? "Up/Down navigate | Enter select | Esc back"));
+  lines.push(styleMuted(safeText(options.footer ?? "Up/Down navigate | Enter select | Esc back")));
   return lines;
 }
 
 function buildTextPromptLines(options: TextPromptOptions, value: string, errorLine?: string): string[] {
   const lines: string[] = [];
 
-  lines.push(styleBrand(options.title));
+  lines.push(styleBrand(safeText(options.title)));
   if (options.subtitle) {
-    lines.push(styleMuted(`  ${options.subtitle}`));
+    lines.push(styleMuted(`  ${safeText(options.subtitle)}`));
   }
 
   lines.push("─");
   if (options.sectionTitle) {
-    lines.push(styleSection(`[ ${options.sectionTitle} ]`));
+    lines.push(styleSection(`[ ${safeText(options.sectionTitle)} ]`));
   }
   if (options.lines && options.lines.length > 0) {
     for (const line of options.lines) {
-      lines.push(`  ${line}`);
+      lines.push(`  ${safeText(line)}`);
     }
   }
 
   lines.push("─");
-  lines.push(styleSection(`[ ${options.label} ]`));
-  lines.push(`  ${value}${styleMuted("_")}`);
+  lines.push(styleSection(`[ ${safeText(options.label)} ]`));
+  lines.push(`  ${safeText(value)}${styleMuted("_")}`);
   if (errorLine) {
-    lines.push(styleError(`  ${errorLine}`));
+    lines.push(styleError(`  ${safeText(errorLine)}`));
   }
 
   lines.push("─");
-  lines.push(styleMuted(options.footer ?? "Type to edit | Enter continue | Esc cancel"));
+  lines.push(styleMuted(safeText(options.footer ?? "Type to edit | Enter continue | Esc cancel")));
   return lines;
 }
 
 function buildPanelLines(options: PanelOptions): string[] {
   const lines: string[] = [];
 
-  lines.push(styleBrand(options.title));
+  lines.push(styleBrand(safeText(options.title)));
   if (options.subtitle) {
-    lines.push(styleMuted(`  ${options.subtitle}`));
+    lines.push(styleMuted(`  ${safeText(options.subtitle)}`));
   }
 
   lines.push("─");
   if (options.sectionTitle) {
-    lines.push(styleSection(`[ ${options.sectionTitle} ]`));
+    lines.push(styleSection(`[ ${safeText(options.sectionTitle)} ]`));
   }
   if (options.lines && options.lines.length > 0) {
     for (const line of options.lines) {
-      lines.push(`  ${line}`);
+      lines.push(`  ${safeText(line)}`);
     }
   }
 
   lines.push("─");
-  lines.push(styleMuted(options.footer ?? "Follow the prompt below"));
+  lines.push(styleMuted(safeText(options.footer ?? "Follow the prompt below")));
   return lines;
 }
 
@@ -606,6 +609,17 @@ function stylePointer(value: string): string {
 
 function styleError(value: string): string {
   return `\x1b[31m${value}\x1b[0m`;
+}
+
+function safeText(value: string): string {
+  return sanitizeTerminalOutput(value);
+}
+
+function sanitizeValidationResult(validate: (value: string) => true | string): (value: string) => true | string {
+  return (value: string): true | string => {
+    const result = validate(value);
+    return result === true ? true : safeText(result);
+  };
 }
 
 export const __menuTestUtils = {

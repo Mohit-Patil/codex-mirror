@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { __menuTestUtils, promptMenu } from "../src/tui/menu.js";
+import { __menuTestUtils, promptMenu, renderPanel } from "../src/tui/menu.js";
 
 describe("promptMenu fallback", () => {
   let restoreProcessStreams: (() => void) | undefined;
@@ -49,6 +49,28 @@ describe("promptMenu fallback", () => {
     expect(input.pauseCalls).toBe(1);
     expect(input.rawModeCalls).toEqual([true, false]);
   });
+
+  it("sanitizes panel content before writing to the terminal", () => {
+    const input = new MockRawInput();
+    const output = new MockRawOutput();
+    restoreProcessStreams = replaceProcessStreams(
+      input as unknown as NodeJS.ReadStream,
+      output as unknown as NodeJS.WriteStream,
+    );
+
+    renderPanel({
+      title: "Panel \u001b[33mTitle\u001b[0m",
+      subtitle: "Line 1\r\nLine 2",
+      lines: ["link \u001b]8;;https://example.com\u0007click\u001b]8;;\u0007", "tab:\tvalue", "bell:\u0007"],
+      footer: "Footer \u001b[33munsafe",
+    });
+
+    expect(output.buffer).not.toContain("\u001b[33mTitle");
+    expect(output.buffer).not.toContain("]8;;https://example.com");
+    expect(output.buffer).not.toContain("\u0007");
+    expect(output.buffer).toContain("Line 1\\r\\nLine 2");
+    expect(output.buffer).toContain("tab:\\tvalue");
+  });
 });
 
 class MockRawInput extends EventEmitter {
@@ -88,7 +110,12 @@ class MockRawOutput {
 
   public columns = 100;
 
-  write(): boolean {
+  public buffer = "";
+
+  write(chunk?: string | Uint8Array): boolean {
+    if (chunk !== undefined) {
+      this.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    }
     return true;
   }
 }

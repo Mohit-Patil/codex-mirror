@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -71,6 +71,53 @@ describe("WrapperManager", () => {
 
     const receivedArgs = (await readFile(argsOutputPath, "utf8")).trim().split("\n");
     expect(receivedArgs).toEqual(["run", "beta", "--", "--model", "o3"]);
+  });
+
+  it("replaces an existing regular wrapper file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-wrapper-"));
+    tempDirs.push(root);
+
+    const binDir = join(root, "bin");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(join(binDir, "alpha"), "#!/usr/bin/env bash\necho old\n", "utf8");
+
+    const manager = new WrapperManager(binDir);
+    await manager.installWrapper(sampleClone("alpha", root));
+
+    const content = await readFile(join(binDir, "alpha"), "utf8");
+    expect(content).toContain("run 'alpha' --");
+    expect(content).not.toContain("echo old");
+  });
+
+  it("refuses to overwrite wrapper symlink targets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-wrapper-"));
+    tempDirs.push(root);
+
+    const binDir = join(root, "bin");
+    await mkdir(binDir, { recursive: true });
+
+    const trapPath = join(root, "trap.txt");
+    await writeFile(trapPath, "do-not-touch\n", "utf8");
+    const wrapperPath = join(binDir, "alpha");
+    await symlink(trapPath, wrapperPath);
+
+    const manager = new WrapperManager(binDir);
+    await expect(manager.installWrapper(sampleClone("alpha", root))).rejects.toThrow("wrapper symlink");
+
+    const stat = await lstat(wrapperPath);
+    expect(stat.isSymbolicLink()).toBe(true);
+    expect(await readFile(trapPath, "utf8")).toBe("do-not-touch\n");
+  });
+
+  it("refuses to overwrite non-regular wrapper targets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-wrapper-"));
+    tempDirs.push(root);
+
+    const binDir = join(root, "bin");
+    await mkdir(join(binDir, "alpha"), { recursive: true });
+
+    const manager = new WrapperManager(binDir);
+    await expect(manager.installWrapper(sampleClone("alpha", root))).rejects.toThrow("non-regular wrapper target");
   });
 });
 

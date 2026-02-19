@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { tmpdir } from "node:os";
@@ -52,7 +52,7 @@ describe("CLI smoke flow", () => {
       expect(listed).toHaveLength(1);
       expect(listed[0]?.name).toBe("smoke");
 
-      const rcFile = join(sandbox, ".bashrc");
+      const rcFile = join(env.HOME!, ".bashrc");
       const pathStatus = await runCli(
         ["path", "status", "--bin-dir", env.CODEX_MIRROR_BIN_DIR!, "--shell", "bash", "--rc-file", rcFile],
         env,
@@ -92,6 +92,35 @@ describe("CLI smoke flow", () => {
     },
     20_000,
   );
+
+  it("allows path setup with default rc symlink when --rc-file is omitted", async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), "codex-mirror-cli-"));
+    tempDirs.push(sandbox);
+
+    const home = join(sandbox, "user-home");
+    const rcTarget = join(home, ".dotfiles", "bashrc");
+    const defaultRc = join(home, ".bashrc");
+    await mkdir(dirname(rcTarget), { recursive: true });
+    await writeFile(rcTarget, "# dotfiles\n", "utf8");
+    await symlink(rcTarget, defaultRc);
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: home,
+      CODEX_MIRROR_HOME: join(sandbox, "mirror-home"),
+      CODEX_MIRROR_BIN_DIR: join(sandbox, "wrapper-bin"),
+    };
+
+    const pathSetup = await runCli(["path", "setup", "--bin-dir", env.CODEX_MIRROR_BIN_DIR!, "--shell", "bash"], env);
+    expect(pathSetup.code).toBe(0);
+    expect(pathSetup.stdout).toContain("Updated:");
+
+    const pathStatus = await runCli(["path", "status", "--bin-dir", env.CODEX_MIRROR_BIN_DIR!, "--shell", "bash"], env);
+    expect(pathStatus.code).toBe(0);
+
+    const rcContent = await readFile(rcTarget, "utf8");
+    expect(rcContent).toContain("codex-mirror PATH");
+  });
 });
 
 async function installFakeCodex(path: string): Promise<void> {

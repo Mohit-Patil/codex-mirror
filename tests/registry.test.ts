@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -66,6 +66,41 @@ describe("RegistryStore", () => {
     const listed = await store.list();
     expect(listed).toHaveLength(40);
     expect(new Set(listed.map((item) => item.name)).size).toBe(40);
+  });
+
+  it("reclaims stale regular lock files before acquiring lock", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-registry-"));
+    tempDirs.push(root);
+
+    const registryPath = join(root, "registry.json");
+    const lockPath = `${registryPath}.lock`;
+    await writeFile(lockPath, "1234\n0\n", "utf8");
+    const staleTime = new Date(Date.now() - 5_000);
+    await utimes(lockPath, staleTime, staleTime);
+
+    const store = new RegistryStore(registryPath, 40, 5);
+    await store.upsert(sampleClone("stale-lock", root));
+
+    const listed = await store.list();
+    expect(listed.map((item) => item.name)).toContain("stale-lock");
+    await expect(lstat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not unlink symlink lock paths while waiting", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-mirror-registry-"));
+    tempDirs.push(root);
+
+    const registryPath = join(root, "registry.json");
+    const lockPath = `${registryPath}.lock`;
+    const lockTarget = join(root, "foreign-lock");
+    await writeFile(lockTarget, "foreign\n", "utf8");
+    await symlink(lockTarget, lockPath);
+
+    const store = new RegistryStore(registryPath, 15, 5);
+    await expect(store.upsert(sampleClone("blocked", root))).rejects.toThrow();
+
+    const lockDetails = await lstat(lockPath);
+    expect(lockDetails.isSymbolicLink()).toBe(true);
   });
 });
 
