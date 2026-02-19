@@ -5,6 +5,7 @@
 - CI is passing on `main`.
 - `npm run check` passes locally.
 - `NPM_TOKEN` secret is configured in GitHub repo settings.
+- Working tree is clean for release files.
 
 ## Versioning
 
@@ -22,13 +23,36 @@ npm version patch
 
 ## Publish flow
 
-1. Push commit and tag:
+1. Bump version (creates commit + tag):
+   ```bash
+   npm version patch
+   ```
+2. Push commit and tag:
    ```bash
    git push origin main --follow-tags
    ```
-2. `Release` workflow runs on `v*` tags.
-3. Workflow verifies package and publishes to npm.
-4. Workflow creates or updates a GitHub Release entry for the same tag with generated notes.
+3. `Release` workflow runs on `v*` tags.
+4. Workflow verifies package, verifies tag/version match, and publishes to npm.
+5. Workflow creates or updates a GitHub Release entry for the same tag with generated notes.
+
+## Tag/version guard
+
+Release workflow validates:
+
+```bash
+TAG_VERSION="${GITHUB_REF_NAME#v}"
+PKG_VERSION="$(node -p "require('./package.json').version")"
+```
+
+If they do not match, release fails.
+
+Manual tag creation must use the package version exactly:
+
+```bash
+PKG_VERSION="$(node -p "require('./package.json').version")"
+git tag -a "v${PKG_VERSION}" -m "${PKG_VERSION}"
+git push origin "v${PKG_VERSION}"
+```
 
 ## Dry run
 

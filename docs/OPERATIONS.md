@@ -2,37 +2,40 @@
 
 ## Common operator tasks
 
+Examples below use the installed command.
+For local development from source, replace `codex-mirror` with `node dist/cli.js`.
+
 ## Health checks
 
 ```bash
-node dist/cli.js doctor
-node dist/cli.js doctor <clone>
-node dist/cli.js doctor --json
+codex-mirror doctor
+codex-mirror doctor <clone>
+codex-mirror doctor --json
 ```
 
 ## Upgrade all clones to current installed Codex
 
 ```bash
-node dist/cli.js update --all
+codex-mirror update --all
 ```
 
 ## Upgrade one clone
 
 ```bash
-node dist/cli.js update <clone>
+codex-mirror update <clone>
 ```
 
 ## Reinstall wrappers
 
 ```bash
-node dist/cli.js wrapper install
+codex-mirror wrapper install
 ```
 
 ## Check/setup PATH for wrappers
 
 ```bash
-node dist/cli.js path status
-node dist/cli.js path setup
+codex-mirror path status
+codex-mirror path setup
 ```
 
 ## Backup / restore
@@ -53,7 +56,7 @@ cp -R ~/.codex-mirror.backup.<timestamp> ~/.codex-mirror
 Then reinstall wrappers:
 
 ```bash
-node dist/cli.js wrapper install
+codex-mirror wrapper install
 ```
 
 ## Cleanup removed/unused clones
@@ -61,13 +64,13 @@ node dist/cli.js wrapper install
 List:
 
 ```bash
-node dist/cli.js list --full
+codex-mirror list --full
 ```
 
 Remove one:
 
 ```bash
-node dist/cli.js remove <clone>
+codex-mirror remove <clone>
 ```
 
 ## Environment controls
