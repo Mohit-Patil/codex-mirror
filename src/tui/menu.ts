@@ -71,9 +71,9 @@ export async function promptMenu<T>(options: MenuOptions<T>): Promise<T> {
     let selected = clamp(options.initialIndex ?? 0, 0, options.items.length - 1);
     const mountedAt = Date.now();
 
-    session.render(() => {
-      const lines = buildMenuLines(options, selected);
-      return renderFrame(lines, process.stdout.columns ?? 100);
+    session.render((now) => {
+      const lines = buildMenuLines(options, selected, now, mountedAt);
+      return renderFrame(lines, process.stdout.columns ?? 100, now);
     });
 
     session.onKey((key) => {
@@ -143,9 +143,9 @@ export async function promptText(options: TextPromptOptions): Promise<string> {
     let errorLine: string | undefined;
     const mountedAt = Date.now();
 
-    session.render(() => {
-      const lines = buildTextPromptLines(options, value, errorLine);
-      return renderFrame(lines, process.stdout.columns ?? 100);
+    session.render((now) => {
+      const lines = buildTextPromptLines(options, value, errorLine, now, mountedAt);
+      return renderFrame(lines, process.stdout.columns ?? 100, now);
     });
 
     session.onKey((key) => {
@@ -223,11 +223,15 @@ export async function promptConfirm(options: ConfirmPromptOptions): Promise<bool
 }
 
 export function renderPanel(options: PanelOptions): void {
-  const lines = buildPanelLines(options);
-  const frame = renderFrame(lines, process.stdout.columns ?? 100);
-  process.stdout.write("\x1b[2J\x1b[H");
+  const now = Date.now();
+  // Static panels do not have a render loop. Instantly reveal typing text 
+  // by setting mountedAt to 0 so elapsed is overwhelmingly large.
+  const mountedAt = 0; 
+  const lines = buildPanelLines(options, now, mountedAt);
+  const frame = renderFrame(lines, process.stdout.columns ?? 100, now);
+  process.stdout.write("\x1b[H");
   process.stdout.write(frame);
-  process.stdout.write("\n");
+  process.stdout.write("\x1b[0J\n");
 }
 
 async function promptMenuFallback<T>(options: MenuOptions<T>): Promise<T> {
@@ -250,7 +254,7 @@ async function promptMenuFallback<T>(options: MenuOptions<T>): Promise<T> {
 }
 
 interface RawSessionController<T> {
-  render: (renderer: () => string) => void;
+  render: (renderer: (now: number) => string) => void;
   onKey: (handler: (key: ParsedKey) => void) => void;
   repaint: () => void;
   resolve: (value: T) => void;
@@ -264,13 +268,18 @@ async function runRawSession<T>(setup: (session: RawSessionController<T>) => voi
   let cleaned = false;
   let parserState = "";
   let keyHandler: ((key: ParsedKey) => void) | undefined;
-  let renderer: (() => string) | undefined;
+  let renderer: ((now: number) => string) | undefined;
+  let renderTimer: NodeJS.Timeout | undefined;
 
   const cleanup = (): void => {
     if (cleaned) {
       return;
     }
     cleaned = true;
+    if (renderTimer) {
+      clearInterval(renderTimer);
+      renderTimer = undefined;
+    }
     input.off("data", onData);
     if (input.isTTY) {
       input.setRawMode(previousRawMode);
@@ -284,9 +293,10 @@ async function runRawSession<T>(setup: (session: RawSessionController<T>) => voi
     if (!renderer) {
       return;
     }
-    output.write("\x1b[2J\x1b[H");
-    output.write(renderer());
-    output.write("\n");
+    // Flicker-free clear: move home, print frame, clear anything left below.
+    output.write("\x1b[H");
+    output.write(renderer(Date.now()));
+    output.write("\x1b[0J\n");
   };
 
   const onData = (chunk: Buffer): void => {
@@ -317,6 +327,14 @@ async function runRawSession<T>(setup: (session: RawSessionController<T>) => voi
       render(nextRenderer) {
         renderer = nextRenderer;
         repaint();
+        if (!renderTimer) {
+          // 20 FPS battery-smooth animation loop (~50ms)
+          renderTimer = setInterval(() => {
+            if (!cleaned) {
+              repaint();
+            }
+          }, 50);
+        }
       },
       onKey(handler) {
         keyHandler = handler;
@@ -343,14 +361,15 @@ async function runRawSession<T>(setup: (session: RawSessionController<T>) => voi
   });
 }
 
-function buildMenuLines<T>(options: MenuOptions<T>, selected: number): string[] {
+function buildMenuLines<T>(options: MenuOptions<T>, selected: number, now: number, mountedAt: number): string[] {
   const lines: string[] = [];
   const summaryTitle = safeText(options.summaryTitle ?? "[ Summary ]");
   const actionsTitle = safeText(options.actionsTitle ?? "[ Actions ]");
 
-  lines.push(styleBrand(safeText(options.title)));
+  lines.push(getAnimatedBrand(safeText(options.title), now));
   if (options.subtitle) {
-    lines.push(styleMuted(`  ${safeText(options.subtitle)}`));
+    const subtitle = getTypingEffect(safeText(options.subtitle), now, mountedAt);
+    lines.push(styleMuted(`  ${subtitle}`));
   }
 
   lines.push("─");
@@ -373,23 +392,24 @@ function buildMenuLines<T>(options: MenuOptions<T>, selected: number): string[] 
     const isSelected = i === selected;
     const index = String(i + 1).padStart(2, " ");
     const label = `${index}. ${safeText(item.label)}`;
-    lines.push(isSelected ? `${stylePointer(">")} ${styleSelected(label)}` : `  ${label}`);
+    lines.push(isSelected ? `${getAnimatedPointer(now)} ${styleSelected(label)}` : `  ${label}`);
     if (item.description) {
       lines.push(`      ${styleMuted(safeText(item.description))}`);
     }
   }
 
   lines.push("─");
-  lines.push(styleMuted(safeText(options.footer ?? "Up/Down navigate | Enter select | Esc back")));
+  lines.push(getPulsingFooter(safeText(options.footer ?? "Up/Down navigate | Enter select | Esc back"), now));
   return lines;
 }
 
-function buildTextPromptLines(options: TextPromptOptions, value: string, errorLine?: string): string[] {
+function buildTextPromptLines(options: TextPromptOptions, value: string, errorLine: string | undefined, now: number, mountedAt: number): string[] {
   const lines: string[] = [];
 
-  lines.push(styleBrand(safeText(options.title)));
+  lines.push(getAnimatedBrand(safeText(options.title), now));
   if (options.subtitle) {
-    lines.push(styleMuted(`  ${safeText(options.subtitle)}`));
+    const subtitle = getTypingEffect(safeText(options.subtitle), now, mountedAt);
+    lines.push(styleMuted(`  ${subtitle}`));
   }
 
   lines.push("─");
@@ -410,16 +430,17 @@ function buildTextPromptLines(options: TextPromptOptions, value: string, errorLi
   }
 
   lines.push("─");
-  lines.push(styleMuted(safeText(options.footer ?? "Type to edit | Enter continue | Esc cancel")));
+  lines.push(getPulsingFooter(safeText(options.footer ?? "Type to edit | Enter continue | Esc cancel"), now));
   return lines;
 }
 
-function buildPanelLines(options: PanelOptions): string[] {
+function buildPanelLines(options: PanelOptions, now: number, mountedAt: number): string[] {
   const lines: string[] = [];
 
-  lines.push(styleBrand(safeText(options.title)));
+  lines.push(getAnimatedBrand(safeText(options.title), now));
   if (options.subtitle) {
-    lines.push(styleMuted(`  ${safeText(options.subtitle)}`));
+    const subtitle = getTypingEffect(safeText(options.subtitle), now, mountedAt);
+    lines.push(styleMuted(`  ${subtitle}`));
   }
 
   lines.push("─");
@@ -433,7 +454,7 @@ function buildPanelLines(options: PanelOptions): string[] {
   }
 
   lines.push("─");
-  lines.push(styleMuted(safeText(options.footer ?? "Follow the prompt below")));
+  lines.push(getPulsingFooter(safeText(options.footer ?? "Follow the prompt below"), now));
   return lines;
 }
 
@@ -508,7 +529,7 @@ function parseKeys(input: string): { keys: ParsedKey[]; rest: string } {
   };
 }
 
-function renderFrame(lines: string[], columns: number): string {
+function renderFrame(lines: string[], columns: number, now: number): string {
   const maxLineLength = Math.max(...lines.map((line) => visibleLength(line)), 1);
   const minWidth = 76;
   const maxWidth = Math.max(minWidth, Math.min(96, columns - 2));
@@ -527,7 +548,59 @@ function renderFrame(lines: string[], columns: number): string {
     out.push(`|${text}${pad}|`);
   }
   out.push(`+${"-".repeat(width - 2)}+`);
-  return out.join("\n");
+  
+  // Append \x1b[K (Clear to End of Line) to each line so that
+  // if a previous frame was wider, the leftover characters are erased.
+  return out.join("\x1b[K\n") + "\x1b[K";
+}
+
+function getAnimatedPointer(now: number): string {
+  // Elegant pulsing vertical bar with color cycling
+  const colorTick = Math.floor(now / 400) % 4;
+  const colors = ["\x1b[36m", "\x1b[34m", "\x1b[35m", "\x1b[96m"];
+  const color = colors[colorTick];
+  
+  const reset = "\x1b[0m";
+
+  // Pulse intensity
+  const wave = (Math.sin(now / 200) + 1) / 2;
+  const boldPrefix = wave > 0.5 ? "\x1b[1m" : "";
+
+  return `${boldPrefix}${color} │  ${reset}`;
+}
+
+function getPulsingFooter(text: string, now: number): string {
+  // Sine wave pulsing on the footer
+  const wave = (Math.sin(now / 300) + 1) / 2; // 0.0 to 1.0
+  if (wave > 0.8) return `\x1b[1;97m${text}\x1b[0m`; // bright white
+  if (wave > 0.3) return `\x1b[37m${text}\x1b[0m`;   // normal
+  return `\x1b[90m${text}\x1b[0m`;                   // dark gray
+}
+
+function getTypingEffect(text: string, now: number, mountedAt: number): string {
+  const elapsed = Math.max(0, now - mountedAt);
+  // ~40 characters per second = 1 char every 25ms
+  const charsToShow = Math.floor(elapsed / 25);
+  
+  if (charsToShow >= text.length) {
+    return text;
+  }
+  
+  const visible = text.slice(0, charsToShow);
+  // Flash a block cursor at the end while typing
+  const cursor = (Math.floor(now / 100) % 2 === 0) ? "\x1b[7m \x1b[0m" : " ";
+  return visible + cursor;
+}
+
+function getAnimatedBrand(title: string, now: number): string {
+  // A moving sine wave color effect across the text or standard pulsing
+  const tick = Math.floor(now / 100) % 10;
+  const spinners = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const brandIcon = spinners[tick];
+  
+  // Pulse the brand
+  const pulse = Math.floor(now / 500) % 2 === 0 ? "\x1b[1;36m" : "\x1b[1;96m";
+  return `${pulse}${brandIcon} ${title}\x1b[0m`;
 }
 
 function truncateText(value: string, maxLength: number): string {

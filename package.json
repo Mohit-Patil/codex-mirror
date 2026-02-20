@@ -42,6 +42,7 @@
     "commander": "^14.0.1"
   },
   "devDependencies": {
+    "@types/inquirer": "^9.0.9",
     "@types/node": "^25.2.3",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2",
